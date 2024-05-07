@@ -1,0 +1,86 @@
+---
+title: "Untitled"
+author: "Wei-Chen Chang"
+date: "2024-03-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(tidymodels)
+```
+
+```{r}
+rawdata <- read_csv("data/EDP_stage1_rawdata.csv")
+rawdata
+```
+```{r}
+outlier <- rawdata %>% 
+  rowwise() %>% 
+  mutate(viol_stoch_domin = is.unsorted(c(x8neg, x7neg, x6neg, x5neg, 
+                                          x4neg, x3neg, x2neg, x1neg, 
+                                          x1pos, x2pos, x3pos, x4pos,
+                                          x5pos, x6pos, x7pos, x8pos))) %>% 
+  filter(viol_stoch_domin == TRUE) %>% 
+  pull(subject)
+outlier
+```
+
+```{r}
+.data <- rawdata %>% 
+  filter(!subject %in% outlier)
+
+data_gain <- .data %>% 
+  select(c(index, subject, alpha, beta), ends_with("pos")) %>% 
+  pivot_longer(cols = ends_with("pos"), names_to = "trial", values_to = "gain") %>% 
+  separate_wider_regex(trial, c(".*", trial="\\d", ".*"))
+  # extract(trial, "trial", "(\\d)", convert = TRUE)
+
+data_loss <- .data %>% 
+  select(subject, ends_with("neg")) %>% 
+  pivot_longer(cols = ends_with("neg"), names_to = "trial", values_to = "loss") %>% 
+  separate_wider_regex(trial, c(".*", trial="\\d", ".*"))
+  # extract(trial, "trial", "(\\d)", convert = TRUE)
+
+
+data_all <- left_join(data_gain, data_loss) %>% 
+  mutate(trial = as.integer(trial)) %>% 
+  nest(data = c(trial, gain, loss))
+
+
+rmarkdown::paged_table(data_all)
+data_all %>% unnest(data)
+```
+
+```{r}
+source("functions/loss_aver_functions.R")
+LA_result <- data_all %>% 
+  mutate(KT_median = map_dbl(data, ~ KT(., output = "coefficient", type = "median")),
+         KT_mean = map_dbl(data, ~ KT(., output = "coefficient", type = "mean")),
+         KT2 = map_dbl(data, ~ KT2(., output = "coefficient")),
+         Neilson_w_err = map_dbl(data, ~ Neilson(., output = "coefficient", error = TRUE)),
+         Neilson_wo_err = map_dbl(data, ~ Neilson(., output = "coefficient", error = FALSE)),
+         WT_median = map_dbl(data, ~ WT(., output = "coefficient", type = "median")),
+         WT_mean = map_dbl(data, ~ WT(., output = "coefficient", type = "mean")),
+         Bowman_w_err = map_dbl(data, ~ Bowman(., output = "coefficient", error = TRUE)),
+         Bowman_wo_err = map_dbl(data, ~ Bowman(., output = "coefficient", error = FALSE)),
+         KW = map_dbl(data, ~ KW(., output = "coefficient"))
+         )
+
+```
+
+```{r}
+LA_result_cat <- data_all %>% 
+  mutate(KT_median = map_chr(data, \(x) KT(x, output = "classification", type = "median")),
+         KT_mean = map_chr(data, ~ KT(., output = "classification", type = "mean")),
+         KT2 = map_chr(data, ~ KT2(., output = "classification")),
+         Neilson_w_err = map_chr(data, ~ Neilson(., output = "classification", error = TRUE)),
+         Neilson_wo_err = map_chr(data, ~ Neilson(., output = "classification", error = FALSE)),
+         WT_median = map_chr(data, ~ WT(., output = "classification", type = "median")),
+         WT_mean = map_chr(data, ~ WT(., output = "classification", type = "mean")),
+         Bowman_w_err = map_chr(data, ~ Bowman(., output = "classification", error = TRUE)),
+         Bowman_wo_err = map_chr(data, ~ Bowman(., output = "classification", error = FALSE)),
+         KW = map_chr(data, ~ KW(., output = "classification")))
+
+```
