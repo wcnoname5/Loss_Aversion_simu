@@ -71,14 +71,17 @@ $\phi = .1$.
 
 Simulate data:
 ```{r simu fun}
-choose_rep_N <- function(Nsim, alpha =.88, beta=.88 ,lambda =2.25, phi =.1,
+choose_rep_N <- function(Nsim, alpha =.88, beta=.88 ,
+                         wp = .5, wn = .5,
+                         lambda =2.25, phi =.1,
                          u_func = c("CRRA","CARA"),
                          show.1 = F, # show task_log
                          show.2 = T) # show lotteries_box)
 {
   u_func <- match.arg(u_func)
   for (i in 1:Nsim){
-    test_result <- experiment(alpha, beta, lambda, phi,u_func,
+    test_result <- experiment(alpha, beta, lambda, phi,
+                              wp, wn, u_func,
                               show.1, show.2) #TK, 1992, phi=.1
     #cat(i)
     if (i==1){
@@ -166,8 +169,8 @@ est_alpha_beta <- function(data_matrix, scale_by =8){
 
 for (i in .lambda){
   if (i==.1){
-    .x <- experiment(.88, .88, lambda=i, phi=NA,u_func="CRRA",F, F)
-  }else(.x <- c(.x, experiment(.88, .88, lambda=i, phi=NA,u_func="CRRA",F, F)))
+    .x <- experiment(.88, .88, lambda=i,wp =.5, wn=.5, phi=NA,u_func="CRRA",F, F)
+  }else(.x <- c(.x, experiment(.88, .88, lambda=i,wp =.5, wn=.5, phi=NA,u_func="CRRA",F, F)))
 }
 .df <- cbind(.lambda,
                matrix(.x, nrow = length(.lambda), ncol=16, byrow = T)) %>% 
@@ -200,7 +203,9 @@ for (i in .lambda){
 ```{r gen data, eval=FALSE, warning=FALSE, include=TRUE}
 N=100
 set.seed(97)
-data_sim <- choose_rep_N(N, u_func = "CRRA")
+data_sim <- choose_rep_N(Nsim=N,alpha =.88, beta=.88 ,
+                         wp = .5, wn = .5, phi=.1,
+                         lambda =2.25, u_func = "CRRA")
 data_matrix <- data_sim$matrix
 data_df <- data_sim$df
 # utility (y axis)

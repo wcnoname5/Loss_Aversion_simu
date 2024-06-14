@@ -3,18 +3,14 @@ library(R6)
 library(tidyverse)
 # 1. Defining classes (Player, lottery, games) -------------------------------
 
-### 1.1 Player
+### 1.1 Player ----
 
 Player <- R6Class("Player",
   private = list(
     # Attributes
-    alpha = NA, # power in gain domain
-    beta = NA, # power in loss domain
-    lambda = NA, # loss aversion in KT, 1992
+    params = list(), # list about utility functions
     phi = NA, # choice consistency
     utility_function = NA,
-    wp = .5,
-    wn = .5,
     # Method
     choose = function(lotteries, utility_function) {
       # Choose one of the lotteries depending on the player's utility function
@@ -28,12 +24,9 @@ Player <- R6Class("Player",
         print(lotteries$B)
         stop("prospect.B error!")
       }
+      ## TODO other than difference?
       prospect_dif <- prospect.B-prospect.A
-      # Determinstic:
-      # if (is.null(phi)) {
-      #   cA = ifelse(prospect_dif<0, TRUE,
-      #               ifelse(prospect_dif==0,rbinom(1,1,.5),FALSE))}
-      # Softmax:
+      
       cho_A_prob <- 1/( 1+exp(private$phi * prospect_dif) ) 
       choose_A <- ifelse(is.na(private$phi), prospect_dif<0,
                    rbinom(1,1, cho_A_prob)) #dif ==0, choose A
@@ -49,36 +42,25 @@ Player <- R6Class("Player",
       # lottery <-  c(gain, loss) ,which is lotteries$A or lotteries$B
       if (lottery[1] == lottery[2]) {  # 100%
           mixed_prospect <- utility(lottery[1],
-                                    private$alpha,
-                                    private$beta,
-                                    private$lambda, type = type)
-       } else {  # 50% vs. 50%
+                                    private$params, type = type)
+       } else {  # 50% 
         gain_prospect <- utility(lottery[1],
-                                 private$alpha,
-                                 private$beta,
-                                 private$lambda, type = type)
+                                 private$params, type = type)
         loss_prospect <- utility(lottery[2],
-                                 private$alpha,
-                                 private$beta,
-                                 private$lambda, type = type)
+                                 private$params, type = type)
         ## TODO: w(.5) = .5 quite doubt
         mixed_prospect <- 
-          (private$wp*gain_prospect) + 
-          (private$wn*loss_prospect)  # assume no weighting function
+          (private$params[["wp"]] * gain_prospect) + 
+          (private$params[["wn"]] * loss_prospect)  # assume no weighting function
       }
       return(mixed_prospect)
     }
   ),
   public = list(
-    initialize = function(params,
-                          # alpha, beta, lambda, wp, wn,
+    initialize = function(params, #include (alpha, beta, lambda, wp, wn),
                           phi,
                           utility_function = c("CRRA","CARA")) {
-      private$alpha <- params["alpha"] 
-      private$beta <- params["beta"]  
-      private$lambda <- params["lambda"] 
-      private$wp <- params["wp"]
-      private$wn <- params["wn"]
+      private$params <- params
       private$phi <- phi 
       private$utility_function <-  match.arg(utility_function)
     },
@@ -100,7 +82,7 @@ Player <- R6Class("Player",
 # 有 1 個 public method：`input_choice()`（把 player 的決策寫在 lotteries 上）。  
 
 
-### 1.2 Lotteries
+### 1.2 Lotteries ----
 Lotteries <- R6Class("Lotteries",
     private = list(
      # Attributes
@@ -108,26 +90,10 @@ Lotteries <- R6Class("Lotteries",
      .B = rep(0L, 2), # Lottery 2
      .result = "",
      # Methods
-     new_lotteries = function(game, trial, task, given_values) {
+     new_lotteries = function(game, lottery_values) {
        # Set values of private$.A and private$.B
-       # given_values <- c(x(i-1)pos, xipos_(j-1), L2, G2)
-       
-       # Get initial values from the game setting
-       G <- game$show_setting()[3]
-       L <- game$show_setting()[4]
-       g <- game$show_setting()[5]
-       l <- game$show_setting()[6]
-       
-       # Set lotteries' value
-       if (trial == 1) {  # L
-         private$.A <- c(G, given_values[2])
-       } else if (trial == 2) {  # x1pos
-         private$.A[1] <- G
-         private$.B[1:2] <- rep(given_values[2])
-       } else if (trial == 3) {  # x1neg
-         private$.A[2] <- L
-         private$.B <- rep(given_values[2], 2)
-       }
+       private$.A <- lottery_values$.A
+       private$.B <- lottery_values$.B
      }
    ),
    active = list(
@@ -148,9 +114,9 @@ Lotteries <- R6Class("Lotteries",
      }
    ),
    public = list(
-     initialize = function(game, trial, task, given_values) {
+     initialize = function(game, lottery_values) {
        # given_values <- c(x(i-1)pos, xipos_(j-1), L2, G2)
-       private$new_lotteries(game, trial, task, given_values)
+       private$new_lotteries(game, lottery_values)
      },
      update_result = function(choice) {
        private$.result <- choice
@@ -165,113 +131,147 @@ Lotteries <- R6Class("Lotteries",
 # 有 1 個 public method：`update_result()`，讓 player 把答案寫在 lotteries 上。  
 
 
-### 1.3 Game
 
-
-# TODO: change n_trials to 3 ----------------------------------------------
-
-Game <- R6Class("Game",
-    private = list(
-      # Attributes
-      # TODO variable init value and sequence
-      init_values = c("G"= 2000L, "L"=-2000L, "g"=300L, "l"=-300L, "x1+"=1000L),  # G, L, g, l, x1pos
-      n_trial = 3L, #19L, # = 5+ 7 + 7
-      n_task = 5L, # times of bisection
-      task_log = NA,  # list of vectors, should be initialized
-      lotteries_box = NA,  # 2D list, should be initialized
-      # Methods
-      ## bisection
-      bisection_update = function(choice, value_list, cur_task, cur_trial) {
-        # choice <- "A" or "B"
-        # value_list: e.g., x1pos_list
-        # length(value_list) <- 6
-        target <- value_list[cur_task] 
-        step <- abs(value_list[1])
+###1.3 Game----
+Game <- R6Class(
+  "Game",
+  # private
+  private = list(
+    # Attributes
+    init_values = # G, L_init, g, l, x1pos
+      c("G"= 2000L, "L"=-2000L, "g"=300L, "l"=-300L, "x1+"=1000L),  
+    n_trial = 3L,  #no. of estimation. 19L = 5+ 7 + 7
+    n_task = 5L, # times of bisection
+    task_log = NA,  # list of vectors, should be initialized
+    lotteries_box = NA,  # 2D list, should be initialized
+    scroll = FALSE, # using scroll bar after `n_trial` bisections
+    # Methods
+    ## bisection
+    bisection_update = function(choice, value_list, cur_task, cur_trial,
+                                scroll=FALSE) {
+      # choice <- "A" or "B"
+      # value_list: e.g., x1pos_list
+      # TODO: modify scroll bar
+      last_est <- value_list[cur_task] #x_{i-1}
+      if  (scroll & cur_task == private$n_task){
+        interv <-  c(last_est, 0)# interval
+        traget <- runif(1, interv[0], interv[1]) # a probability generator
+      }else{
+        # TODO: modify biesction s.t. starting value affect less
+        step <- abs(value_list[1]) # x_0 
+        # upbd <- 2000 # upper bound of step
+        # step <- max(abs(value_list[1]), upbd) 
         change <- ((1 / 2) ^ cur_task) * step
         
-        if (cur_trial == 1) {  # L
+        if (cur_trial == 1) {  # estimate L
           change <- -change
         }
         
         if (choice == "A") {
-          target <- target + change
+          target <- last_est + change
         } else {
-          target <- target - change
+          target <- last_est - change
         }
         
         target <- as.integer(round(target / 5) * 5)  # Make target divisible by 5
-        return(target) # return bisection iteration value
       }
-    ),
-    public = list(
-      initialize = function() {
+        return(target) # return bisection iteration value
+    }
+    ## PEST
+  ),
+  ## Public
+  public = list(
+    initialize =
+      function(exp_params =
+                 list(n_task=5L,
+                      init_values =
+                        c("G"= 2000L, "L"=-2000L,
+                          "g"=300L, "l"=-300L, "x1+"=1000L)
+                 ),
+               scroll = FALSE) {
         n_trial <- private$n_trial
-        n_task <- private$n_task
+        n_task <- exp_params$n_task
+        private$n_task <- n_task
+        private$init_values <- exp_params$init_values
+        private$scroll <- scroll
+        
         # Initialize task_log
-        private$task_log <- rep(list(rep(NA, n_task + 1L)), n_trial)
-        private$task_log[[1]][1] <- private$init_values[2] # -2000
-        private$task_log[[2]][1] <- private$init_values[5] # 1000
+        private$task_log <- matrix(NA, ncol = n_trial, nrow = n_task + 1L,
+                                   dimnames = list(c(), c("L", "x1pos","x1neg")))
+        private$task_log[1, 1] <- private$init_values["L"] # -2000
+        private$task_log[1, 2] <- private$init_values["x1+"] # 1000
         
         # Initialize lotteries_box
         private$lotteries_box <- as.list(rep(NA, n_trial * n_task))
         dim(private$lotteries_box) <- c(n_trial, n_task)
       },
-      show_setting = function() {
-        # Output how many trials and tasks there are in this game
-        setting <- c(
-          "N_est" = private$n_trial,
-          "N_bisect" = private$n_task,
-          "Init" = private$init_values
-        )
-        return(setting)
-      },
+    
+    show_setting = function() {
+      # Output how many trials and tasks there are in this game
+      setting <- c(
+        "N_est" = private$n_trial,
+        "N_bisect" = private$n_task,
+        "Init" = private$init_values
+      )
+      return(setting)
+    },
+    
+    # Generate a new pair of lotteries.
+    generate_lotteries = function(cur_trial, cur_task) {  
+      G <- private$init_values["G"]
+      if (cur_trial == 1) {  # L
+        .A <- c(G, self$show_task_log()[cur_task, "L"])
+        .B <- rep(0L,2)
+      } else if (cur_trial == 2) {  # x1pos
+        .A <- c(G, 0)
+        .B <- rep(self$show_task_log()[cur_task, "x1pos"], 2)
+      } else if (cur_trial == 3) {  # x1neg
+        L <- self$show_task_log()[private$n_task, "L"]
+        .A <- c(0, L)
+        .B <- rep(self$show_task_log()[cur_task, "x1neg"], 2)
+      }
       
-      # Generate a new pair of lotteries.
-      generate_lotteries = function(cur_trial, cur_task) {  
-        needed_values <- rep(NA, 2)
-        # Find needed_values[2] depending on current task
-        needed_values[2] <- private$task_log[[cur_trial]][cur_task]
-        
-        # Produce a new pair of lotteries
-        new_lotteries <- Lotteries$new(self, cur_trial, cur_task, needed_values)
-        return(new_lotteries)
-      },
+      lottery_values <- list(".A" = .A, ".B" = .B)
+      new_lotteries <- Lotteries$new(self, lottery_values)
+      return(new_lotteries)
+    },
+    
+    update_lotteries_box = function(lotteries, cur_trial, cur_task) {
+      private$lotteries_box[[cur_trial, cur_task]] <- lotteries
+    },
+    
+    update_task_log = function(choice, cur_trial, cur_task) {
+      # The function takes the choice of players, does the computation, and update the task log.
+      # Update the current value
+      target_list <- private$task_log[, cur_trial]
+      value <- private$bisection_update(choice, target_list, cur_task, cur_trial, scroll=FALSE) 
+      private$task_log[cur_task + 1, cur_trial] <- value
       
-      update_lotteries_box = function(lotteries, cur_trial, cur_task) {
-        private$lotteries_box[[cur_trial, cur_task]] <- lotteries
-      },
-      
-      update_task_log = function(choice, cur_trial, cur_task) {
-        # The function takes the choice of players, does the computation, and update the task log.
-        # Update the current value
-        target_list <- private$task_log[[cur_trial]]
-        value <- private$bisection_update(choice, target_list, cur_task, cur_trial) 
-        private$task_log[[cur_trial]][cur_task + 1] <- value
-        
-        # Update next trial's initial value
-        if (cur_task == 5) {  # Updating values after the final task of this trial
-          g <- private$init_values[3]
-          l <- private$init_values[4]
-          
-          if (cur_trial == 2) {  # x1pos, initialize x1neg[1]
-            L <- private$task_log[[1]][6]
-            private$task_log[[3]][1] <- as.integer(round(floor(L * .5) / 5) * 5)  # x1neg[1]
-          } else if (cur_trial == 3) {  # x1neg, initialize L2 & G2
-            x1pos <- private$task_log[[2]][6]
-            x1neg <- private$task_log[[3]][6]
-          }
+      # Update next trial's initial value
+      if (cur_task == private$n_task) {  # Updating values after the final task of this trial
+        # g <- private$init_values["g"]
+        # l <- private$init_values["l"]
+
+        if (cur_trial == 2) {  #end of x1+, initialize x1neg[1]
+          L <- private$task_log[(private$n_task+1), "L"]
+          private$task_log[1, "x1neg"] <-
+            as.integer(round(floor(L * .5) / 5) * 5)  
+        } else if (cur_trial == 3) {  # x1neg, initialize L2 & G2
+          # x1pos <- private$task_log[(private$n_task+1), "x1pos"]
+          # x1neg <- private$task_log[(private$n_task+1), "x1neg"]
         }
-      },
-      output_exp_result = function() {
-        # result <- rep(NA, 16)
-        result <- rep(NA, 2)
-        result[1] <- private$task_log[[2]][6]
-        result[2] <- private$task_log[[3]][6]
-        names(result) <- paste0("x1", c("+","-"))
-        return(result)
-      },
-      show_task_log = function() private$task_log,
-      show_lotteries_box = function() private$lotteries_box
+      }
+    },
+    output_exp_result = function() {
+      len <- length(private$task_log[,1])
+      result <- rep(NA, 2)
+      result[1] <- private$task_log[(private$n_task+1), "x1pos"] #x1+
+      result[2] <- private$task_log[(private$n_task+1), "x1neg"] #x1-
+      names(result) <- paste0("x1", c("+","-"))
+      return(result)
+    },
+    show_task_log = function() private$task_log,
+    show_lotteries_box = function() private$lotteries_box
   )
 )
 
@@ -295,6 +295,7 @@ Game <- R6Class("Game",
 # + `show_task_log()`：輸出 `task_log`，輸出格式是 list of vector
 # + `show_lotteries_box()`：輸出 `lotteries_box`，輸出格式是 `dim = 2` 的 list
 
+
 # 2. Define `experiment()` ------------------------------------------------
 
 
@@ -302,33 +303,37 @@ Game <- R6Class("Game",
 ## 可以在 `experiment()` 分別設定要不要輸出 `task_log` 和 `lotteries_box`。
 
 experiment = function(params, #alpha, beta, lambda, wp, wn,
+                      exp_params=list(n_task = 5L,
+                                      init_values =
+                                        c("G"= 2000L, "L"=-2000L,"g"=300L, "l"=-300L, "x1+"=1000L)
+                                      ),
                       phi, u_func = c("CRRA", "CARA"),
                       task_log=FALSE,
                       lotteries_box=FALSE) {  # Given player's attribute
   u_func <- match.arg(u_func)
   # Initialization
   player <- Player$new(params, phi, u_func)
-  game <- Game$new()
+  game <- Game$new(exp_params=exp_params)
   
   # Start the experiment
-  for (trial in 1:game$show_setting()[1]) {
-    for (task in 1:game$show_setting()[2]) {
-      cur_lotteries <- game$generate_lotteries(trial, task)
-      player$input_choice(cur_lotteries)
+  for (trial in 1:game$show_setting()[1]) { # no. of estimated quantities
+    for (task in 1:game$show_setting()[2]) { # no. of bisection
+      cur_lotteries <- game$generate_lotteries(trial, task) # (->Lottery class object)
+      player$input_choice(cur_lotteries) # update lottery by player's choice
       game$update_lotteries_box(cur_lotteries, trial, task)
-      game$update_task_log(cur_lotteries$result, trial, task)
+      game$update_task_log(cur_lotteries$result, trial, task) # bisection
     }
   }
   
   # Finish the experiment
   exp_result <- game$output_exp_result()
   if (task_log | lotteries_box) {
-    exp_result <- list(exp_result)
+    exp_result <- list("estimates" = exp_result)
     if (task_log) {
-      exp_result <- append(exp_result, list(game$show_task_log()))
+      exp_result$log <- game$show_task_log()
     }
     if (lotteries_box) {
-      exp_result <- append(exp_result, list(game$show_lotteries_box()))
+      exp_result$lotteries <- game$show_lotteries_box()
     }
   }
   return(exp_result)
@@ -349,17 +354,25 @@ CARA <- function(x, mu, nu, lambda=2.25){
   return(utility)
 }
 
-utility <- function(x, a, b, lambda, type = c("CRRA", "CARA")){
+utility <- function(x, params, type = c("CRRA", "CARA")){ #params be a list
   type <-  match.arg(type)
+  lambda <-  params$lambda
+  if (type =="CRRA"){
+    alpha <- params$alpha
+    beta <- params$beta
+  }else{
+    mu <- params$mu
+    nu <- params$nu
+  }
   ss <-  switch(type,
-              "CRRA" = CRRA(x, alpha = a, beta = b, lambda= lambda),
-              "CARA" = CARA(x, mu = a, nu = b, lambda= lambda))
+              "CRRA" = CRRA(x, alpha = alpha, beta = beta, lambda= lambda),
+              "CARA" = CARA(x, mu = mu, nu = nu, lambda= lambda))
   return(ss)
 }
 
 # Playground --------------------------------------------------------------
 
-param = c("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5)
+# param = c("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5)
 # experiment(param, phi=NA, u_func = "CRRA", T, T)
 # experiment(.88, .88, 2.25, phi = NA, u_func = "CRRA", F, F)
 # 
@@ -369,3 +382,5 @@ param = c("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5)
 # 
 # points(0,0, pch=19, col = "red")
 # 
+
+  

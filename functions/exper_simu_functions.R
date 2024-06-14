@@ -117,7 +117,7 @@ Lotteries <- R6Class("Lotteries",
          private$.A[1] <- G
          private$.B[1:2] <- rep(given_values[2])
        } else if (trial == 3) {  # x1neg
-         private$.A[2] <- L
+         private$.A[2] <- game$show_task_log[[1]][6] # Last L
          private$.B <- rep(given_values[2], 2)
        } else if (trial == 4) {  # L2
          private$.A[2] <- l

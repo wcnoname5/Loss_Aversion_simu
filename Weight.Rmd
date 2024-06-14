@@ -20,6 +20,14 @@ source("functions/loss_aver_functions.R")
 theme_set(theme_bw())
 ```
 
+```{r}
+experiment(alpha =.88,
+           beta=.88, lambda =2.25, phi =NA,
+           wp = .5, wn = .5,
+           u_func = c("CRRA","CARA"),
+           F, F)
+```
+
 # Function For simulation
 
 ```{r func_for_simu}

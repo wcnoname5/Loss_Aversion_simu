@@ -6,6 +6,41 @@ library(tidymodels)
 # gain: x1+, ..., x8+
 # loss: x1-, ..., x8-
 
+est_alpha_beta <- function(data_matrix, scale_by =8){
+  u = c(1,2,3,4,5,6,7,8,-1,-2,-3,-4,-5,-6,-7,-8)/scale_by # set U(x8+)=1 and U(x8-)=1
+  
+  ## double scaling wrt pos and neg
+  
+  data_matrix[,2:9] = data_matrix[,2:9]/data_matrix[,scale_by+1]
+  data_matrix[,10:17] = data_matrix[,10:17]/-data_matrix[,scale_by+9]
+  
+  # data_matrix[,2:9] = data_matrix[,2:9]/apply(data_matrix[,2:9], 1, FUN = max) #column
+  # data_matrix[,10:17] = data_matrix[,10:17]/-apply(data_matrix[,10:17], 1, FUN = min)
+  
+  alpha <- data.frame(subject = data_matrix[,1],
+                      pos = 1:nrow(data_matrix),
+                      neg = 1:nrow(data_matrix),
+                      RMSE = 1:nrow(data_matrix))
+  # sum of squared error
+  upos = function(a.pos){sum((ypos - xpos^a.pos)^2)} 
+  uneg = function(a.neg){sum((-yneg - (-xneg)^a.neg)^2)} 
+  for (i in 1:nrow(data_matrix)){
+    ypos = u[1:8]
+    xpos = data_matrix[i,2:9]
+    yneg = u[9:16]
+    xneg = data_matrix[i,10:17]
+    
+    alpha[i,2] <- optimize(upos,interval = c(-40,40))$minimum
+    a.pos <- optimize(upos,interval = c(-40,40))$minimum 
+    alpha[i,3] <- optimize(uneg,interval = c(-40,40))$minimum
+    a.neg <- optimize(uneg,interval = c(-40,40))$minimum 
+    alpha[i,4] <- sqrt((sum((ypos - xpos^a.pos)^2) + sum((-yneg - (-xneg)^a.neg)^2)/16))
+    
+    # uplot1(i)
+  }
+  return(alpha)
+}
+
 get_minusx_utility <- function(x, data, method = c("interpolation", "power_func"), 
                                alpha = NULL, beta = NULL){
   method <- match.arg(method)
@@ -243,3 +278,7 @@ KW <- function(data, output = c("coefficient", "classification", "all"),
     lambda
   }
 }
+
+# prelec <- function(p, gamma){
+#   return(p^(gamma)/(p^gamma+(1-p)^gamma)^(1/gamma))
+# }
