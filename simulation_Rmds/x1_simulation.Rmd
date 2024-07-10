@@ -4,20 +4,34 @@ author: "Wei-Chen Chang"
 date: "`r Sys.Date()`"
 output:
    html_document:
+     toc: true
+     toc_depth: 2
+     toc_float: true
+     code-link: true
+     code-tools: true
      code_folding: show
      code_download: true
-  
+     code-overflow: "scroll"
+     self-contained: true
+     number_sections: true
+bibliography: "CPT_loss_aversion.bib"  
+csl: "apa.csl"
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE,
-                       fig.align='center')
+knitr::opts_chunk$set(
+	echo = TRUE,
+	fig.align = "center",
+	warning = FALSE,
+	rows.print=8
+)
 ```
 
 ```{r lib, message=FALSE, include=FALSE}
-# library(R6)
-# library(tidyverse)
+library(tidyverse)
+library(glue)
 library(magrittr)
+library(patchwork)
 # import functions
 source("../functions/exper_simu_functions_x1only.R")
 # source("../functions/loss_aver_functions.R")
@@ -25,9 +39,13 @@ theme_set(theme_bw())
 ```
 
 
-# Overview of Abdellaoui et al.(2016) experiment Settings
+# Overview of @abdellaoui2016 experiment Settings
  
-![TO exp](./images/A2016_TO.png)   
+
+<center>
+<img src="./images/A2016_TO.png" alt="TO_exp" width="512"/>
+</center>
+
 
 3 equivalence needed to elicit. 
 $$
@@ -39,13 +57,13 @@ $$
 $$
 With G = 2000.
 
-In EDP project, the indifferent point was determined by using bisection method for 5 iterations. For Abdellaoui et al.(2016), they run bisection for 3 times and lastly ask subject to determine indifference using a slider (scrollbar). 
+In EDP project, the indifferent point was determined by using bisection method for 5 iterations. For @abdellaoui2016, they run bisection for 3 times and lastly ask subject to determine indifference using a slider (scrollbar). 
 
 The detailed bisection method would be described as below.
 
 ## Bisection Method
 
-Abdellaoui(2000), Abdellaoui et al.(2007, 2016)等文章皆有使用，[Abdellaoui (2000)](https://doi.org/10.1287/mnsc.46.11.1497.12080) 該篇描寫較為詳盡，以下解讀多是參考該篇。
+@abdellaoui2000, @abdellaoui2007, @abdellaoui2016 等文章皆有使用，@abdellaoui2000 該篇描寫較為詳盡，以下解讀多是參考該篇。
 
 
 ### General Case:
@@ -59,23 +77,23 @@ Abdellaoui(2000), Abdellaoui et al.(2007, 2016)等文章皆有使用，[Abdellao
     * 如果包含y的選項(lottery)被選擇，代表 y 比較吸引人，下次更新應該數值應該要比現在小，更新區間$[l, u]$中upper bound: $u\leftarrow \frac{(l+u)}{2}$。
     * 反之亦然，若**不**包含y的選項(lottery)被選擇，更新區間$[l, u]$中lower bound: $l\leftarrow \frac{(l+u)}{2}$
   
-3.    Assign y 為新的區間中之中點(如一)，回到2.，直到設定的bisection 次數結束。
+3.    Assign y 為新的區間中之中點(如1. )，回到2.，直到設定的bisection 次數結束。
 
 
-### 實例應用於實驗中
+### 實例: TO實驗中
 
 實驗中要測得的$L, x_1^+, x_1^-$，可以由觀察得到 $L \in (-\infty, 0)$,
 $x_1^+ \in (0, G)$, $x_1^- \in (L, 0)$ (滿足Stochastic dominance)。其中為了讓$L$有下界，
-直接參照Abdellaoui et al. (2016) 之作法，設定 $L \in (-2G, 0)$, 且 $L$的初始值直接是$-G$。
+直接參照 @abdellaoui2016 之作法，設定 $L \in (-2G, 0)$, 且 $L$的初始值直接是$-G$。
 \
 以下psudocode 以 $L$ 的 bisection 為例示範
 
 ```{r bisection_psudocode, eval = FALSE}
 G <- -2000L
-n_bisec <- 5 # of bisection
+n_bisec <- 5 # times of bisection
 bisec_L <- function(G, n_bisec){
   bound <- c(-2*G ,0)
-  L <- mean(bound) # staring point
+  L <- mean(bound) # staring point (midpoint)
   for (i in 1:n_bisec){
     # step 2.
     if (lottery.A.chosen) { #lottery including `L`
@@ -83,7 +101,7 @@ bisec_L <- function(G, n_bisec){
     }else if (lottery.B.chosen) {
       bound[1] <- L
     }
-    # step 3.
+    # step 3. midpoint
     L <- mean(bound)
   }
   return(L)
@@ -98,33 +116,79 @@ Bisection 透過中點對半切的方式來快速縮減到所求數值，不過�
 
 ## Slider(scrollbar)
 
-Abdellaoui et al. (2016) 採用的是先進行三次bisection縮減區間後，再讓受試者直接選擇
+@abdellaoui2016 採用的是先進行三次bisection縮減區間後，再讓受試者直接選擇
 indifference point. 但為了讓受試者可以有犯錯的機會，最後使用的slider區間有動一點手腳變寬，如下:
 
 假設bisection結束後得到區間為$[l_B, u_B], l_B<u_B$, 且令$\Delta = u_B-l_B$,
-則受試者使用Slider限定的區間$[l_s,u_s] = [[l_B-\Delta, u_B+\Delta]].$
+則受試者使用Slider限定的區間$[l_s,u_s] = [l_B-\Delta, u_B+\Delta].$
 
 ### Potential Drawback:
 
-bisection法這類choice-based原先就是擔心slider 這種 matching 法(見 Bostic et al., 1990)
+bisection法這類choice-based原先就是擔心slider 這種 matching 法(見 @bostic1990)
 可能有bias 所因應。現縮減範圍後再使用slider或許無法消除bias，只是限制bias的大小
 不要太超過而已。
+
+
+## PEST (Additional)
+
+除了 @abdellaoui2016 用的bisection法外，此次模擬額外做了 @bostic1990 文中使用的PEST法。
+
+PEST 類似staircase method，但也有像bisection一樣有將step size的改變。
+主要是受試者的選擇只要產生轉折(reversal)，就會將step size減半，若選擇方向不變，
+則step size維持(除了某些例外)。而只要step size最終縮小到一定程度，PEST就停止。
+
+詳細描述如下[@bostic1990].
+
+> 1. Each time the direction of stepping changes (a reversal), halve the step size.
+> 2. A step in the same direction as the last step uses the same size of step as previously, with the following exceptions:
+>    - A third step in the same direction calls for a doubled step, and each successive step in the same direction is also doubled until the next reversal. This rule has its own exceptions:
+>      - If a reversal follows a doubling of step size, then an extra same-sized step is taken after the original two, before doubling.
+> 3. A maximum size of step is specified, at least 8 or 16 times the size of the minimum step.
+
+
+### Drawback
+主要和Bisection法最大的差異每個點需要測定的次數不固定(受到起始點和受試者的選擇隨機性影響)。也因此耗時，
+需要的trial number大概是bisection的1.5到2倍之上，但就程序上看起來無 bisection 法受選擇隨機性的影響。
+
+是否能保證converge(如，是否特定的選擇pattern會使得整個程序卡住無法進行)未知，仍須找文獻回顧看看。
+
+### 模擬設定
+在模擬過程中主要一些參數設定如下:
+
+1. Initial step size: $320$, maximum 為 $1280$。
+
+2. Criterion of Convergence: 接受最小step size 為 $5$ ，只要最後一次reversal造成step size
+砍半小於5，就停止PEST，以最後一次選擇的值作為indifferent的估計。
+
+主要進行的操弄如下，主要觀察除了估計量的性質，亦觀察收斂前選擇次數的多寡。:
+
+1. Starting point: 不像 Bisection 法由中點切入，PEST 只要在範圍(見上，如)內隨便找其中一點都可以作為起始點，
+只是這會影響自開始到收斂所需要的步數。
+之後的模擬有對這點進行操弄，主要有兩種方式:
+    -  Fixed Initial value: 跟 Bisection 一樣從中點開始。
+    -  Random Initial value: 起始點從 $L,x_1^+,x_1^-$ 三點的範圍內以 uniform隨機 選中一點(再rounding 成5的倍數)，以該點作為 PEST 的起始點。
+
+2. Choice randomness: 為觀察starting point的影響選擇次數的多寡，
+額外設定受試者是否有隨機性(是否根據根據softmax選擇)。
+
 
 # Simulation Setting
 
 
 模擬的agent做出每個選擇主要有 2 個部分，如下:
-1. agent 計算每個lottery 的價值是依據 Cumulative Prospect Theory (Tversky & Kahnaman, 1992)
-2. agent 根據計算兩個lottery之間價值的差異，最後以softmax function轉換，產出選擇每個lottrery的機率，再根據此機率進行選擇
 
-另外，這部分模擬主要操弄的是Bisection 次數、以及是否在最後一次使用slider進行選擇，每一個情況下*皆重複 1000 次*。
+1. agent 計算每個lottery 的價值是依據 Cumulative Prospect Theory [@TK1992]
+
+2. agent 根據計算兩個lottery之間價值的差異，最後以lottery function轉換，產出選擇每個lottery的機率，再根據此機率進行選擇
+
+另外，這部分模擬主要操弄的是Bisection 次數、以及是否在最後一次使用slider進行選擇，每一個情況下**皆重複 1000 次**。
 
 下面小節會描述這些模擬實作上的細節。
 
 
 ## CPT:
 
-Following Tversky & Kahnaman (1992), using power family utility function 
+Following @TK1992, using power family utility function 
 ($U(x)=\begin{cases}x^{\alpha},\;x\geq 0\\-\lambda |x|^{\beta},\;x<0 \end{cases}$),
 with parameter values: $\alpha=\beta=0.88;\lambda=2.25$, and set both gain and loss weighting function for 0.5 as
 0.5, i.e.,
@@ -132,22 +196,29 @@ $w^+(0.5)=w^-(0.5)=0.5.$
 
 
 
-```{r include=FALSE}
-param = list("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5)
-opt <- 1:3
-names(opt) <- c("L", "x1pos", "x1neg")
-l <- Lotteries$new(list(".A" = c(2000,0), ".B"= c(0,0)))
-opt[1] <- l$find_optimal(params = param, trial = 1) # 796
-l <- Lotteries$new(list(".A" = c(2000,0), ".B"= c(0,0)))
-opt[2] <- l$find_optimal(params = param, trial = 2) # 796
-l <- Lotteries$new(list(".A" = c(0, opt[1]), ".B"= c(0,0)))
-opt[3] <- l$find_optimal(params = param, trial = 3) # 796
-rm(l)
+```{r find_optimal, include=FALSE}
+
+find_optimal_params <- function(
+    params =list("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5)
+    ){
+  opt <- 1:4
+  names(opt) <- c("L", "x1pos", "x1neg", "lambda")
+  l <- Lotteries$new(list(".A" = c(2000,0), ".B"= c(0,0)))
+  opt[1] <- l$find_optimal(params = params, trial = 1) # 796
+  l <- Lotteries$new(list(".A" = c(2000,0), ".B"= c(0,0)))
+  opt[2] <- l$find_optimal(params = params, trial = 2) # 796
+  l <- Lotteries$new(list(".A" = c(0, opt[1]), ".B"= c(0,0)))
+  opt[3] <- l$find_optimal(params = params, trial = 3) # 796
+  opt[4] <- -opt[2]/opt[3]
+  opt
+}
+opt <- find_optimal_params(params = 
+                             list("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5))
 opt
 ```
 Under such setting, $L=-796$, $x_1^+=910$, $x_1^-=-362$ (rounding to integer) theoretically,
 and the KW loss aversion coefficient $\lambda= \frac{-x_1^+}{x_1^-}$
-(Köbberling and Wakker, 2005; Abdellaoui et al., 2016) is `r -opt[2]/opt[3]`.
+(@KW_index_2005; @abdellaoui2016) is `r -opt[4]|> round(3)`.
 
 ## Choice Rule:
 
@@ -158,19 +229,21 @@ $$
 $$
 $\phi$越大(>1)，選擇越決定性;反之，越小越隨機。
 
-參考 Nilsson et al. (2011), Glöckner and Pachur (2012) 的分析，$\phi$ 暫且設定為 $0.2$. 
+參考 @nilsson2011, @GlocknerPachur2012 的分析，$\phi$ 暫且設定為 $0.2$. 
 
 
 ## Times of Bisection:
 
-如果不使用 slider，設定 bisection 為 5, 7, 8, 及 10次；加上slider，
-則設定使用 slider 前的 bisection 次數為 3, 5, 6, 及 8次。 
+如果不使用 slider，設定 bisection 為 5, 7, 8, 及 10次；
+若加上slider，則設定使用 slider 前的 bisection 次數為 4, 6, 7, 及 9次，
+再最後一次使用 slider 進行選擇。 
 
-如果使用slider，最後選擇的 indifferent point 由一 normal distribution 產生(有四捨五入到整數)，mean是由CPT算出的理論值，sd 暫且設定為$20$。
+如果使用slider，最後選擇的 indifferent point 由一 normal distribution 產生(有四捨五入到整數)，
+mean是由CPT算出的理論值，sd 暫且設定為$20$。
 若產生的數字超出bisection找出的範圍，則設定成boundary。
 
 
-## Simulation Implementation
+## Codes for Implementation
 
 
 ```{r func demo}
@@ -181,22 +254,38 @@ exp.param = list(
     c("G"= 2000L, "L"=-2000L,"g"=300L, "l"=-300L, "x1+"=1000L)
 )
 
-make_log <- function(rep, params = param, exp_params=exp.param, phi=0.1, slider=FALSE){
+make_log <- function(rep, params = param, exp_params=exp.param, phi=0.1,
+                     est_type = c("Bisection", "Bisection-Slider", "PEST"),
+                     random_init=FALSE){
+  est_type <- match.arg(est_type)
   for (i in 1:rep){
-    result <- experiment(params=params, exp_params = exp_params,
-                         phi=phi, u_func = "CRRA", slider = slider,
-                         task_log =TRUE
-                         )
-    # c(result$log[[1]],result$log[[2]],result$log[[3]]) 
-    df.tmp <- data.frame(
-      result$log,
-      "Bisection"=1:(exp_params$n_task+1), "Nsim"=i)
-    if (i==1){
-      df <-  df.tmp
-    }else{
-      df <- rbind(df, df.tmp)
+    result <- experiment(
+      params=params, exp_params = exp_params,
+      phi=phi, u_func = "CRRA", est_type = est_type,
+      task_log =TRUE, random_init = random_init
+      )
+    
+    if (est_type=="PEST"){ 
+      # each entry is a vector
+      df.tmp <- tibble(
+        Nsim = i,
+        L = result$log["L"], 
+        x1pos = result$log["x1pos"],
+        x1neg = result$log["x1neg"])
     }
+    else{    
+      # c(result$log[[1]],result$log[[2]],result$log[[3]]) 
+      df.tmp <- data.frame(
+        "Nsim" = i,
+        "Bisection"=1:(exp_params$n_task+1),
+         result$log)
+    }
+    
+    if(i==1) {df <- df.tmp}
+    else {df <- rbind(df, df.tmp)}
   }
+  # df <- df %>% 
+  #   mutate(lambda = -x1pos/x1neg)
   df
 }
 ```
@@ -205,6 +294,8 @@ make_log <- function(rep, params = param, exp_params=exp.param, phi=0.1, slider=
 dir_name <- "./x1_simulation_RDS/"
 file_names <- c("bisection_simu.RDS", "bisection_slider_simu.RDS") 
 files <- paste0(dir_name, file_names)
+pic_path <- "./figs/"
+
 param <- list("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5)
 Nsim <- 1000
 n_bisec <- c(5L, 7L, 8L, 10L)
@@ -222,9 +313,10 @@ if ( all(file.exists(files)) ){
       init_values =
         c("G"= 2000L, "L"=-2000L,"g"=300L, "l"=-300L, "x1+"=1000L)
     )
-    exp.result[[i]] <- make_log(Nsim,exp_params = exp.param, phi=.2)
-    exp.param$n_task <- n_bisec[i]-2
-    exp.result.slider[[i]] <- make_log(Nsim,exp_params = exp.param, phi=.2, slider=TRUE)
+    exp.result[[i]] <- make_log(Nsim,exp_params = exp.param, phi=.2,
+                                est_type = "Bisection")
+    exp.result.slider[[i]] <- make_log(Nsim,exp_params = exp.param, phi=.2,
+                                       est_type = "Bisection-Slider")
     cat(i, "finished, it takes", as.numeric(Sys.time() - t0), "seconds.\n")
   }
   if (!file.exists(dir_name)) dir.create(dir_name)
@@ -234,18 +326,43 @@ if ( all(file.exists(files)) ){
 rm(list = c("dir_name", "file_names", "files"))
 ```
 
-# Simulation results
+
+---
+
+# Simulation results (Bisection and Slider)
+
+
+本節主要呈現 Bisection 和Slider的模擬結果
 
 ## Bisection only: {.tabset}
 
 ### Histogram
 
-紅色虛線是根據模擬參數算出來的indifference point. loss aversion coefficient $\lambda$(最右側column)的計算是基於Köbberling and Wakker(2005)的estimate($\frac{-x_1^+}{x_1^-}$)，該圖的灰色虛線是模擬設定的$\lambda=2.25$。
-```{r historgram, fig.width = 12, fig.height = 12}
+紅色虛線是根據模擬參數算出來的indifference point. loss aversion coefficient $\lambda$(最右側column)的計算是基於 @KW_index_2005 的estimate($\frac{-x_1^+}{x_1^-}$)，該圖的灰色虛線是模擬設定的$\lambda=2.25$。
+```{r historgram, eval=FALSE, fig.height=10, fig.width=12, include=FALSE, results='hold'}
 est <- c("L", "x1pos", "x1neg")
+xlims <- list("L" = c(-900, -680),
+              "x1pos" = c(800, 1050),
+              "x1neg" = c(-450,-300))
+pic_path <- "./figs/"
+pic_name <- "Bisection_Only_Hist.png"
+fname <- paste0(pic_path, pic_name)
+# ss <- function(df){
+#   df %>% 
+#     mutate(lambda = -x1pos/x1neg)
+# }
+# exp.result <- exp.result %>%
+#   map(.f = ss)
+if (!dir.exists(pic_path)) {
+  dir.create(pic_path)
+}else if(dir.exists(fname)){
+  png(fname, width = 1200*.8, height = 1000*.8)
+}# else{}
+
 par(mfrow = 
       c(length(n_bisec),4),
-    mar=c(5, 4, 3, 2) + 0.1
+    mar=c(5, 4, 3, 2) + 0.1,
+    oma = c(0, 0, 2, 0)
     )
 for (i in 1:length(n_bisec)){
   tmp <- exp.result[[i]] %>%
@@ -254,20 +371,131 @@ for (i in 1:length(n_bisec)){
   for (point in 1:length(est)){
     tmp[ ,est[point] ]%>% 
       hist(main = paste0(est[point], " estimate from bisection=", n_bisec[i]),
-           breaks = 10, freq = F, xlab="")
+           breaks = 15, freq = F, xlab = est[point], xlim = xlims[[est[point]]])
     abline(v=opt[point], col="red", lwd=2, lty=2)
   } 
     tmp$lambda %>% 
       hist(main = paste0("lambda estimate from bisection=", n_bisec[i]),
-           breaks = 20, freq = F, xlab="")
+           breaks = 20, freq = F, xlab = "lambda", xlim=c(2.1, 3.0))
     abline(v = -opt[2]/opt[3], col="red", lwd=2, lty=2)
     abline(v = 2.25, col="grey30", lwd=1.5, lty=3)
 }
+# Add a supertitle
+mtext("Parameter Estimates: Bisection Only", outer = TRUE, cex = 1.5)
+# save
+if( !dir.exists(fname)){
+  dev.off()
+}# else{}
 ```
 
+#### Histogram using `ggplot2`
+
+```{r historgram_ggplot, fig.height=10, fig.width=12}
+bisec_plot2 <- function(df_list, opt, n_bisec_vec=n_bisec, slider=F, fix_xlim=T) {
+  est <- c("L", "x1pos", "x1neg", "lambda")
+  xlims <- list("L" = c(-875, -680),
+              "x1pos" = c(800, 1000),
+              "x1neg" = c(-450,-250),
+              "lambda" = c(2.0, 3.5))
+  names(xlims) <- est
+  super.title <- ifelse(
+    !slider,
+    "Parameter Estimates: Bisection Only",
+    "Parameter Estimates: Bisection-Slider"
+  )
+  # Create an empty list to store plots
+  plot_list <- list()
+  # Generate plots and store them in the list
+  for (i in 1:length(df_list)) {
+    df <- df_list[[i]] %>%
+      filter(Bisection==n_bisec_vec[i]+1) %>%
+      mutate(lambda = -x1pos/x1neg)
+    for (point in est) {
+      fig.title <- glue(" {point}, bisection={n_bisec_vec[i]}")
+      if (point != "lambda" & !slider) {
+        plt <- df %>%
+          ggplot(aes(x = !!sym(point))) +
+          geom_bar(
+            aes(y = after_stat(count) / sum(after_stat(count))),
+            fill = "grey80",
+            color = "black",
+            width = 5
+          ) +
+          ylab("Propotion")
+      } else{
+        plt <- df %>%
+          ggplot(aes(x = !!sym(point))) +
+          geom_histogram(
+            aes(y = after_stat(density)),
+            bins = 20,
+            fill = "grey80",
+            color = "black"
+          )
+        
+      }
+      
+      if (fix_xlim & point != "lambda") {
+        plt <- plt +
+          scale_x_continuous(limits = xlims[[point]],
+                             breaks =
+                               seq(xlims[[point]][1],
+                                   xlims[[point]][2],
+                                   by = 25)) +
+          theme(axis.text.x = element_text(angle = 45, hjust = 1))
+      }
+      else if (point == "lambda") {
+        plt <- plt +
+          scale_x_continuous(limits = xlims[[point]],
+                             breaks =
+                               seq(xlims[[point]][1],
+                                   xlims[[point]][2],
+                                   by = .2)) +
+          geom_vline(
+            xintercept = 2.25,
+            color = "grey30",
+            lwd = 1,
+            lty = 3
+          ) 
+      }
+      else{
+        plt <- plt +
+          scale_x_continuous(breaks = scales::breaks_pretty(n = 7))
+      }
+      plt <- plt +
+        xlab(point) +
+        geom_vline(
+          xintercept = opt[point],
+          color = "red",
+          lwd = 1.1,
+          lty = 2
+        ) +
+        ggtitle(fig.title)
+      
+      # Add the plot to the list
+      plot_list[[length(plot_list) + 1]] <- plt
+    }
+  }
+  
+  # Combine plots using patchwork
+  combined_plot <- wrap_plots(plot_list, byrow = TRUE,
+                              ncol = 4, nrow = 4)+
+    plot_annotation(title =super.title)
+  return(combined_plot)
+}
+
+pic_name <- "Bisection_Only_Hist_gg.png"
+fname <- paste0(pic_path, pic_name)
+bisec_plot2(exp.result, opt = opt, n_bisec_vec = n_bisec,
+            slider=F, fix_xlim=T)
+if (!file.exists(fname)) {
+  ggsave(fname,
+         units = "in",
+         height = 10,
+         width = 12)
+}# else{}
+```
 
 ### Barchart
-
 
 ```{r barchart, fig.width =8, fig.height = 12}
 est <- c("L", "x1pos", "x1neg")
@@ -292,15 +520,21 @@ for (i in 1:length(n_bisec)){
 
 ### Summary Statistics
 
-
 Provide the summary (aggregate) statistics and the true value of each indifference point.
 Also the bias based on mean and median estimates were computed, too.
+
+
+整體來看，當 bisection 次數為5 十 $L$估計是有偏的，猜想應是此時的 step size 太大導致無法很靠近真值。
+其餘大致不偏(bias 幾乎都在5以內，除`n_bisect`=8的$L$)，因為模擬設定上有限制讓最後的點都四捨五入至5的倍數，
+因此 bias 在這這範圍內算合理。
+另就efficiency來看，隨著bisection次數上升，sd有下降的趨勢(除了`n_bisect`=5在某些情況sd蠻小)。
 ```{r summary table}
+summ_list <- list()
 summary_stats <- function(df, n) {
   df %>%
     filter(Bisection == n + 1) %>%
-    mutate(lambda = -x1pos/x1neg, .after = x1neg) %>% 
-    summarise(across(L:lambda, list(
+    mutate(lambda = -x1pos/x1neg, .after = x1neg) %>%
+    summarise(across(-c(Nsim,Bisection), list(
       mean = \(x) mean(x, na.rm = TRUE)|>round(2),
       median = \(x) median(x)|>round(2),
       sd = \(x) sd(x, na.rm = TRUE)|>round(2)
@@ -308,8 +542,8 @@ summary_stats <- function(df, n) {
       # max = ~ max(.x, na.rm = TRUE)
     ), .names = "{.col}_{.fn}"))
 }
-
 # Apply summary_stats to each data frame in the list with corresponding n_bisec value
+
 summ_table <- map2(exp.result, n_bisec, summary_stats) %>% 
   bind_rows(.id = "n_bisect") %>%
   mutate(n_bisect = n_bisec[as.numeric(n_bisect)]) %>% 
@@ -324,81 +558,162 @@ summ_table <- map2(exp.result, n_bisec, summary_stats) %>%
     values_from = "value"
   ) %>% 
   add_column(
-    true_value=rep(c(opt, round(-opt[2]/opt[3],2)) ,4),
-    .before = "mean"
+    true_value=rep(opt, 4),
+    # .before = "mean"
   ) %>%
   mutate(
-    med_bias = median - true_value,
-    mean_bias = mean - true_value,
+    med_bias = (median - true_value) |> round(2),
+    mean_bias = (mean - true_value) |> round(2),
     .after = sd,
     variable = factor(variable, levels = c(est, "lambda"))
   ) %>%
   arrange(variable)
-
-summ_table %>% rmarkdown::paged_table()
+summ_list[[1]] <- summ_table
+summ_list[[1]] %>% rmarkdown::paged_table()
 ```
 
 ### Bisection bias 影響
 
 下圖以bisection =10, 測$x_1^+$ 為例，
-顯示bisection 在選擇有隨機性的情況下可能無法converge。圖中灰色虛線是真值。
+顯示bisection 在選擇有隨機性的情況下可能無法converge。圖中灰色虛線是真值，
+藍色區域是 95% CI (註:前幾個bisection因 95% CI 紙包括下面的線，所以看不到)。
 可以看到最上面一條曲線一開始選錯跳到1500後，雖然後來隨著bisection次數變多有越靠近真值，
 但是漸進線只能到1000該點，對於其他線也是如此，隨著bisection數增加到後來估計值看起來沒有聚集到一個點上。
 ```{r}
+CI_bisec <- exp.result.slider[[4]] %>%
+  mutate(Nsim = as.factor(Nsim)) %>%
+  group_by(Bisection) %>%
+  mutate(across(
+    L:x1neg,
+    list(
+      "upper95" = ~ quantile(.x, .975),
+      "lower95" = ~ quantile(.x, .025)
+    ),
+    .names = "{.col}_{.fn}"
+  ))
+
+
 exp.result[[4]] %>%
   mutate(Nsim = as.factor(Nsim)) %>% 
   group_by(Nsim) %>% 
-  ggplot(aes(x=Bisection, y = x1pos)) +
-  geom_line(aes(color = Nsim, group = Nsim), linewidth=1.2)+
-  geom_hline(yintercept = opt[2], color ="grey40", lty=2, lwd=1.1)+
-  geom_point()+
+  ggplot(aes(x=Bisection)) +
+  geom_line(aes(y = x1pos, group = Nsim),color ="pink2", linewidth=1.2, alpha=.3)+
+  geom_ribbon(data = CI_bisec,
+              aes(ymin = x1pos_lower95, ymax = x1pos_upper95),
+              fill = "cornflowerblue", alpha = .65
+              ) +
+  geom_hline(aes(y = x1pos), yintercept = opt[2], color ="grey40", lty=2, lwd=1.1)+
+  geom_point(aes(y = x1pos), shape=20)+
   theme(legend.position = "none")+
   scale_x_continuous(breaks=scales::breaks_pretty())+
   ggtitle("x1+, bisection = 10")
  
 ```
 
-## {-}
-
-### 小節
-
-雖然整體的分布來看bisection還不錯，但對於選擇有隨機性的情況下
-bisection不能convergence 有點嚴重
-
 ## w/ slider {.tabset}
 
 ### Historgram
 
-```{r hist2, fig.width =12, fig.height = 12}
-par(mfrow = 
-      c(length(n_bisec),4),
-    mar=c(5, 4, 3, 2) + 0.1
+```{r hist2, eval=FALSE, fig.height=12, fig.width=12, include=FALSE}
+# ---- Function ----
+xlims <- list("L" = c(-900, -680),
+              "x1pos" = c(800, 1050),
+              "x1neg" = c(-450,-250))
+.plot <- function() {
+  par(
+    mfrow = c(length(n_bisec), 4),
+    mar = c(5, 4, 3, 2) + 0.1,
+    oma = c(0, 0, 2, 0)
+  )
+  for (i in 1:length(n_bisec)) {
+    tmp <- exp.result.slider[[i]] %>%
+      filter(Bisection == n_bisec[i] + 1) %>%
+      mutate(lambda = -x1pos / x1neg)
+    for (point in 1:length(est)) {
+      tmp[, est[point]] %>%
+        hist(
+          main = glue(
+            "{est[point]} estimate w/ slider, bisection={n_bisec[i]}"
+          ),
+          breaks = 25,
+          freq = F,
+          xlab = est[point],
+          xlim = xlims[[est[point]]]
+        )
+      abline(
+        v = opt[point],
+        col = "red",
+        lwd = 2,
+        lty = 2
+      )
+    }
+    tmp$lambda %>%
+      hist(
+        main = paste0("lambda estimate w/ slider, bisection=", n_bisec[i]),
+        breaks = 20,
+        freq = F,
+        xlab = "",
+        xlim = c(2.0, 3.5)
+      )
+    abline(
+      v = -opt[2] / opt[3],
+      col = "red",
+      lwd = 2,
+      lty = 2
     )
-for (i in 1:length(n_bisec)){
-  tmp <- exp.result.slider[[i]] %>%
-    filter(Bisection==n_bisec[i]-2+1) %>% 
-    mutate(lambda = -x1pos/x1neg)
-  for (point in 1:length(est)){
-    tmp[ ,est[point] ]%>% 
-      hist(main = paste0(est[point], " estimate w/ slider, bisection=", n_bisec[i]-2),
-           breaks = 25, freq = F, xlab="")
-    abline(v=opt[point], col="red", lwd=2, lty=2)
+    abline(
+      v = 2.25,
+      col = "grey30",
+      lwd = 1.5,
+      lty = 3
+    )
   }
-  tmp$lambda %>% 
-    hist(main = paste0("lambda estimate w/ slider, bisection=", n_bisec[i]-2),
-         breaks = 20, freq = F, xlab="")
-  abline(v = -opt[2]/opt[3], col="red", lwd=2, lty=2)
-  abline(v = 2.25, col="grey30", lwd=1.5, lty=3)
+    # Add a supertitle
+  mtext("Parameter Estimates: Bisection-Slider", outer = TRUE, cex = 1.5)
+}
+
+# ---- Plotting ----
+pic_path <- "./figs/"
+pic_name <- "Bisection-Slider_Hist.png"
+fname <- paste0(pic_path, pic_name)
+if (!dir.exists(pic_path)) {
+  cat("Creating Picture Path \n")
+  dir.create(pic_path)
+  png(fname, width = 1200*.8, height = 1000*.8)
+  .plot()
+  dev.off()
+}else if(dir.exists(fname)){
+  png(fname, width = 1200*.8, height = 1000*.8)
+  .plot()
+  dev.off()
+}else{
+  .plot()
+}
+rm(.plot)
+```
+
+#### Historgram using `ggplot2`
+
+```{r historgram_ggplot2, fig.height=10, fig.width=12}
+pic_name <- "Bisection-Slider_Hist_gg.png"
+fname <- paste0(pic_path, pic_name)
+bisec_plot2(exp.result.slider, opt = opt, n_bisec_vec = n_bisec, slider = T)
+if (!file.exists(fname)){
+  ggsave(fname,units = "in",
+         height=10,width=12)
 }
 ```
 
-### Statistics
+### Summary Statistics
+
+整體而言仍是不偏，sd 在`n_bisec`$\leq 8$ 之前皆大於單純 bisection，
+但在 `n_bisec=10` 的時候就比 bisection 小了。
 
 ```{r summ2}
 # Apply summary_stats to each data frame in the list with corresponding n_bisec value
-summ_table <- map2(exp.result.slider, n_bisec-2, summary_stats) %>% 
+summ_table <- map2(exp.result.slider, n_bisec, summary_stats) %>% 
   bind_rows(.id = "n_bisect") %>%
-  mutate(n_bisect = n_bisec[as.numeric(n_bisect)]-2) %>% 
+  mutate(n_bisect = n_bisec[as.numeric(n_bisect)]) %>% 
   pivot_longer(
     -n_bisect,
     names_to = c("variable", "statistic"),
@@ -409,25 +724,66 @@ summ_table <- map2(exp.result.slider, n_bisec-2, summary_stats) %>%
     names_from = "statistic",
     values_from = "value"
   ) %>% 
-  add_column(true_value=rep(c(opt, round(-opt[2]/opt[3],2)),4),
-             .before = "mean") %>% 
+  add_column(true_value=rep(opt,4),
+             # .before = "mean"
+             ) %>% 
   mutate(
-    med_bias = median - true_value,
-    mean_bias = mean - true_value,
+    med_bias = round((median - true_value), 2),
+    mean_bias = round((mean - true_value), 2),
     .after = sd,
     variable = factor(variable, levels = c(est, "lambda"))
   ) %>% 
   arrange(variable) 
+summ_list[[2]] <- summ_table
 summ_table %>% rmarkdown::paged_table()
 ```
 
+### Check Convergence
 
-因為模擬設定的關係所以slider在重複多次的aggregate data大致都是不偏，且sd相等。
-不一定能反映人實際的選擇行為。
+同樣藍色區域是 95% CI。似乎看不出個所以然來。
+```{r}
+CI_slider <- exp.result.slider[[4]] %>%
+  mutate(Nsim = as.factor(Nsim)) %>%
+  group_by(Bisection) %>%
+  mutate(across(
+    L:x1neg,
+    list(
+      "upper95" = ~ quantile(.x, .975),
+      "lower95" = ~ quantile(.x, .025)
+    ),
+    .names = "{.col}_{.fn}"
+  ))
 
-## {-}
+exp.result.slider[[4]] %>%
+  mutate(Nsim = as.factor(Nsim)) %>% 
+  group_by(Nsim) %>% 
+  ggplot(aes(x=Bisection)) +
+  geom_line(aes(y = x1pos, group = Nsim),color ="pink2", linewidth=1.2, alpha=.3)+
+  geom_ribbon(data = CI_slider,
+              aes(ymin = x1pos_lower95, ymax = x1pos_upper95),
+              fill = "cornflowerblue", alpha = .65
+              ) +
+  geom_hline(aes(y = x1pos), yintercept = opt[2], color ="grey40", lty=2, lwd=1.1)+
+  geom_point(aes(y = x1pos), color ="grey50", shape =20)+
+  theme(legend.position = "none")+
+  scale_x_continuous(breaks=scales::breaks_pretty())+
+  ggtitle("x1+, bisection-Slider = 10")
+ 
+```
+## 小節
 
-## AAA
+就兩者而言整體資料皆是不偏。  
+就整體的分布來看，雖然 Bisection法是不偏看似不錯，但對於選擇有隨機性的情況下
+bisection 無法 converge 可能是嚴重的問題。
+而 slider 在選擇次數多的時候 sd 比 Bisection 低，這點或許可以支持slider是不錯的估計法。
+但也可能只是這邊模擬設定上產生的現象，不一定代表人實際選擇會按照模擬設定走。
+
+
+---
+
+# Different $\lambda$ Values
+
+額外更改模擬中$\lambda$的值，進行Bisection的模擬(bisection次數為8, 模擬次數為1000)，因為結果與前述無太大差異，就不多討論，只附上結果
 
 ```{r}
 dir_name <- "./x1_simulation_RDS/"
@@ -436,7 +792,7 @@ files <- paste0(dir_name, file_names)
 
 Nsim <- 1000
 param <-  list("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5)
-.lambda <- c(0.5, 1L, 2L, 5L)
+.lambda <- c(0.5, 1, 2, 5)
 exp.param = list(
   n_task = 8L,
   init_values =
@@ -455,14 +811,15 @@ if (all(file.exists(files))){
     opt <- 1:3
     names(opt) <- c("L", "x1pos", "x1neg")
     l <- Lotteries$new(list(".A" = c(2000,0), ".B"= c(0,0)))
-    opt[1] <- l$find_optimal(params = param, trial = 1) # 796
+    opt[1] <- l$find_optimal(params = param, trial = 1) 
     l <- Lotteries$new(list(".A" = c(2000,0), ".B"= c(0,0)))
-    opt[2] <- l$find_optimal(params = param, trial = 2) # 796
+    opt[2] <- l$find_optimal(params = param, trial = 2) 
     l <- Lotteries$new(list(".A" = c(0, opt[1]), ".B"= c(0,0)))
-    opt[3] <- l$find_optimal(params = param, trial = 3) # 796
+    opt[3] <- l$find_optimal(params = param, trial = 3) 
     indif.list[[i]] <- opt
     exp.result.loss[[i]] <- make_log(
-      Nsim, params = param, exp_params = exp.param, phi=.2)
+      Nsim, params = param, exp_params = exp.param, phi=.2, 
+      est_type = "Bisection")
     cat(i, "finished, it takes", as.numeric(Sys.time() - t0), "seconds.\n")
   }
   if (!file.exists(dir_name)){
@@ -478,6 +835,12 @@ rm(list=c("dir_name", "file_names", "files"))
 ## Result {.tabset}
 
 ### historgram
+
+同樣，紅線是真值，在$\lambda$ 中灰色虛線為模擬設定之參數。看起來除了$\lambda=0.5$之外皆是不偏。
+另注意$\lambda$改變並不會影響$x_1^+$ 的真值。
+且可以看出在 @TK1992 的parametric form設定下，
+$\lambda<1$， @KW_index_2005 之 index 會「低估」 loss aversion，
+而$\lambda>1$ 則會高估。
 
 ```{r historgram3, fig.width = 12, fig.height = 12}
 est <- c("L", "x1pos", "x1neg")
@@ -527,7 +890,49 @@ for (i in 1:length(.lambda)){
 }
 ```
 
-### AAA
+### Summary Statistics
+
+$L$ 的sd 似乎有隨著 $\lambda$ 設定增加而減小的現象，連帶影響到$x_1^-$的sd.
+```{r paged.print=TRUE, rows.print=8}
+summary_stats <- function(df, n) {
+  df %>%
+    filter(Bisection == n + 1) %>%
+    mutate(lambda = -x1pos/x1neg, .after = x1neg) %>%
+    summarise(across(-c(Nsim,Bisection), list(
+      mean = \(x) mean(x, na.rm = TRUE)|>round(2),
+      median = \(x) median(x)|>round(2),
+      sd = \(x) sd(x, na.rm = TRUE)|>round(2)
+      # min = ~ min(.x, na.rm = TRUE),
+      # max = ~ max(.x, na.rm = TRUE)
+    ), .names = "{.col}_{.fn}"))
+}
+# Apply summary_stats to each data frame in the list with corresponding n_bisec value
+
+summ_table <- map2(exp.result.loss, 8, summary_stats) %>% 
+  bind_rows(.id = "simu_lambda") %>%
+  mutate(simu_lambda = .lambda[as.numeric(simu_lambda)]) %>% 
+  pivot_longer(
+    -simu_lambda,
+    names_to = c("variable", "statistic"),
+    names_sep = "_",
+    values_to = "value"
+  ) %>%
+  pivot_wider(
+    names_from = "statistic",
+    values_from = "value"
+  )%>%
+  mutate(
+    variable = factor(variable, levels = c(est, "lambda"))
+  ) %>% 
+  arrange(variable)
+summ_table %>% 
+  rmarkdown::paged_table()
+```
+
+
+### Check Convergence
+
+值得一提的是，當 $\lambda$ 極小時， $L$ 真值已經超出一開始設定的範圍$(0, -4000)$，因此Bisection無法收斂。
 
 ```{r}
 plist=list()
@@ -544,7 +949,575 @@ for (i in 1:4){
     ggtitle(paste0("L, lambda=", .lambda[i]))
   plist[[i]] <- .p  
 }
-ggpubr::ggarrange(plotlist = plist,
-                  ncol = 2,nrow=2)
+
+patchwork::wrap_plots(plist, ncol=2)
+# ggpubr::ggarrange(plotlist = plist,ncol = 2,nrow=2)
 ```
 
+---
+
+# PEST Result 
+
+## Simulation {.tabset}
+
+模擬以下三種情況，各產生1000選擇序列次收集起來結果。
+
+1. Random Initial Value, No choice randomness `(random_init)`
+2. Fixed Initial Value, Softmax Choice `(random_choice)`
+3. Random Initial Value, Softmax Choice `(random_init_and_choice)`
+
+除了觀察估計值的準確性之外，亦檢查 PEST 花了多少trials收斂。
+
+### Codes
+
+```{r PEST}
+library(glue)
+library(patchwork)
+# ----Simulation params----
+Nsim <- 1000
+param = list("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5)
+exp.param = list(
+  # n_task = 5L,
+  init_values =
+    c("G"= 2000L, "L"=-2000L,"g"=300L, "l"=-300L, "x1+"=1000L)
+)
+
+# function
+cleaning <- function(df) {
+  get_last_element <- function(vec) {
+    map_dbl(vec, \(x) x[length(x)])
+  }
+  df %>%
+    mutate(
+      across(L:x1neg,
+             \(x) map_dbl(x, \(x) x[1]),
+             .names = "{.col}_start"),
+      across(L:x1neg,
+             get_last_element,
+             .names = "{.col}_est"),
+      across(L:x1neg,
+             \(x) map_dbl(x, length),
+             .names = "{.col}_len"),
+      lambda = -x1pos_est / x1neg_est,
+      across(L:x1neg,
+             \(x) map(x, \(x) tail(x, 6)[-6]),
+             .names = "{.col}_last")
+    )
+}
+
+# ----plotting params----
+dir_name <- "./x1_simulation_RDS/"
+file_names <- c("PEST.RDS") 
+fname <- paste0(dir_name, file_names)
+pic_path <- "./figs/"
+suptiltle.name <- c(
+  "Random Initial value, No Choice Randomness",
+  "Fixed Initial value, Softmax Choice",
+  "Random Initial value, Softmax Choice"
+)
+
+# ----Creating/Reading Files----
+if (file.exists(fname)){
+  PEST.results <- readRDS(fname)
+} else {
+  PEST.results <- list()
+  PEST.results[[1]] <- make_log(
+    rep = Nsim,
+    params = param,
+    exp_params = exp.param,
+    phi = NA,
+    est_type = "PEST",
+    random_init = TRUE
+  ) 
+  PEST.results[[2]] <- make_log(
+    rep = Nsim,
+    params = param,
+    exp_params = exp.param,
+    phi = .2,
+    est_type = "PEST",
+    random_init = FALSE
+  )
+  PEST.results[[3]] <- make_log(
+    rep = Nsim,
+    params = param,
+    exp_params = exp.param,
+    phi = .2,
+    est_type = "PEST",
+    random_init = TRUE
+  )
+  names(PEST.results) <-
+    c("random_init", "random_choice", "random_init_and_choice")
+  PEST.results <- PEST.results %>%
+    map(cleaning)
+  saveRDS(PEST.results, file = fname)
+}
+
+# ----Plotting function----
+PEST_plot2 <- function(df, opt, fix_xlim=T) {
+  est <- c("L", "x1pos", "x1neg")
+  suffix <- c("est", "len") #, "start")
+  # xlims <- list(c(-840,-760), c(850,960), c(-410, -310))
+  xlims <- list("L" = c(-875, -680),
+            "x1pos" = c(800, 1000),
+            "x1neg" = c(-450,-250),
+            "lambda" = c(2.0, 3.5))
+  # names(xlims) <- est
+  # Create an empty list to store plots
+  plot_list <- list()
+  # Generate plots and store them in the list
+  for (suf in suffix) {
+    for (point in est) {
+      .colname <- paste(point, suf, sep = "_")
+      fig_suf  <- switch (suf,
+                          "est" = "Estimation",
+                          "len" = "PEST Times")
+      fig.title <- glue(" {fig_suf} of {point}")
+      
+      # Times of PEST
+      if (suf == "len") { 
+        plt <- df %>%
+          # ggplot(aes_string(x = .colname)) +
+          ggplot(aes(x = !!sym(.colname))) +
+          geom_bar(aes(y = after_stat(count) / sum(after_stat(count))),
+                   fill = "grey80", color = "black") +
+          ylab("Propotion") +
+          scale_x_continuous(breaks =
+                               seq(min(df[[.colname]]),
+                                   max(df[[.colname]]),
+                                   by = 3))
+      } else { # Estimation
+        plt <- df %>%
+          # ggplot(aes_string(x = .colname)) +
+          ggplot(aes(x = !!sym(.colname))) +
+          geom_histogram(
+            aes(y = after_stat(density)),
+            bins = 20,
+            fill = "grey80",
+            color = "black"
+          )
+        # Fix x_limit == TRUE
+        if (fix_xlim){
+          plt <- plt +
+          scale_x_continuous(
+            limits = xlims[[point]],
+            breaks = seq(xlims[[point]][1],
+                         xlims[[point]][2],
+                         by = ifelse(point !="lambda",
+                                     25,0.2)
+                         )
+            )
+        }else{
+          plt <- plt +
+          scale_x_continuous(breaks=scales::breaks_pretty(n=7))
+        }
+      }
+      plt <- plt +
+        xlab(point) +
+        # theme(axis.text.x = element_text(angle = 10, hjust = 1)) +
+        ggtitle(fig.title)
+      # Add line True Value
+      if (suf == "est") {
+        plt <- plt +
+          geom_vline(xintercept = opt[point],
+                     color = "red",
+                     lwd=1.1, lty = 2)
+      }# else{}
+      # Add the plot to the list
+      plot_list[[length(plot_list) + 1]] <- plt
+    }
+  }
+  
+  # Combine plots using patchwork
+  combined_plot <- wrap_plots(plot_list, ncol = 3)
+  return(combined_plot)
+}
+```
+
+
+
+
+### Summary Plots {.tabset .tabset-fade .tabset-pills}
+
+三種模擬情況的描述統計圖，可以看見大致都估計都 unbiased，而PEST收斂前需要
+進行的次數大概是右偏。比較同樣是Softmax 的受試者，Fixed/Random 的初始值可以看出
+隨機的初始值平均而言言似乎會增加收斂前需要的選擇次數。
+
+#### Random initial value, no choice randomess
+
+無選擇隨機性情況下scale 很小，就沒有和其他兩張圖一樣固定x軸scale
+```{r fig.height=5, fig.width=6*1.6, warning=TRUE}
+PEST_plot2(PEST.results[[1]], opt=opt, fix_xlim = F)+
+          plot_annotation(title = glue("PEST {suptiltle.name[1]}"))
+```
+
+#### Fixed initial value, Softmax
+
+```{r fig.height=5, fig.width=6*1.6}
+PEST_plot2(PEST.results[[2]], opt=opt)+
+          plot_annotation(title = glue("PEST {suptiltle.name[2]}"))
+```
+
+#### Random initial value, Softmax
+
+```{r fig.height=5, fig.width=6*1.6}
+PEST_plot2(PEST.results[[3]], opt=opt)+
+          plot_annotation(title = glue("PEST {suptiltle.name[3]}"))
+```
+
+
+```{r save figs, eval=FALSE, fig.height=5, fig.width=6*1.6, include=FALSE}
+for (i in 1:3) {
+  plt <- PEST_plot2(PEST.results[[i]], opt=opt, fix_xlim = (i!=1))+
+          plot_annotation(title = glue("PEST {suptiltle.name[i]}"))
+  print(plt)
+  fname <- glue("{pic_path}PEST_{names(PEST.results)[i]}.png")
+  if (!file.exists(fname)) {
+    ggsave(fname,
+           plt,
+           unit = "px",
+           height = 1600,
+           width = 2560)
+  }# else{}
+}
+```
+
+#### All $\lambda$ 
+
+$\lambda$ 估計量的整理。
+
+```{r lambda figs, echo=FALSE, fig.height=3.5, fig.width=12}
+plist <- list()
+for (i in 1:3) {
+  plt <- PEST.results[[i]] %>%
+    ggplot(aes(x = lambda))
+  if (i == 1) {
+    plt <- plt +
+      geom_bar(aes(y = after_stat(count) / sum(after_stat(count))),
+               fill = "grey80",
+               color = "black")+
+      ylab("Propotion")
+  } else{
+    plt <- plt +
+      geom_histogram(aes(y = after_stat(density)),
+                     bins = 30 ,
+                     fill = "grey80",
+                     color = "black")
+    
+  }
+  plt <- plt +
+    geom_vline(
+      xintercept = -opt[2] / opt[3],
+      color = "red",
+      lwd = 1.1,
+      lty = 2
+    ) +
+    scale_x_continuous(limits = c(2.0, 3.5),
+                       breaks = seq(2.0,
+                                    3.5,
+                                    .2)) +
+    ggtitle( {suptiltle.name[i]} )
+  
+  plist[[length((plist)) + 1]] <- plt
+}
+patchwork::wrap_plots(plist, ncol = 3, nrow = 1) +
+  plot_annotation(title = glue("PEST Lambda estimates"))
+
+# fname <- glue("{pic_path}PEST_lambda.png")
+# if (!file.exists(fname)) {
+#   ggsave(fname,
+#          plt,
+#          unit = "in",
+#          height = 3.5,
+#          width = 12)
+# }# else{}
+```
+
+### Summary Statistics:
+
+
+#### Estimation
+
+這裡整理 bisection, slider(`bisection-slider`)和 PEST的結果一同呈現。
+總體而言PEST估計式也是 unbiased,
+三者的$(L,x_1^+, x_1^-,\lambda)$的估計量 sd 與 bisection 及 slider 法相比的確有比較小。
+但$\lambda$ 的單位較小，因此在bisection=10的情況下差異並不大。
+在受試者有選擇隨機性的時候，random initial表現看起來fixed initial比差不多。
+
+```{r paged.print=TRUE, rows.print=11}
+summary_stats2 <- function(df) {
+  df %>%
+  select(Nsim, ends_with("est"), ends_with("len")) %>%
+  mutate(lambda_est = -x1pos_est / x1neg_est) %>%
+  pivot_longer(
+    cols = -Nsim,
+    names_to = c("variable", "type"),
+    names_pattern = "^(.*)_(.*)$",
+    values_to = "values"
+  ) %>%
+  group_by(type, variable) %>% 
+  summarise(across(
+    values,
+    list(
+      mean = \(x) mean(x) |> round(2),
+      median = \(x) median(x, na.rm = TRUE) |> round(2),
+      sd = \(x) sd(x, na.rm = TRUE) |> round(2),
+      min = \(x) min(x),
+      max = \(x) max(x)
+    ),
+    .names = "{.fn}"
+    ),
+  .groups = "drop")
+}
+summ_table <- map(PEST.results, summary_stats2) %>%
+  bind_rows(.id = "PEST_type") %>%
+  mutate(
+    variable = factor(variable,
+                   levels = c("L", "x1pos", "x1neg", "lambda")
+                   )
+    ) %>%
+  arrange(type, variable) %>% 
+  add_column(
+    true_value= c(rep(opt, rep(3,4)), rep(NA, 9)) ,
+    .after = "sd"
+  ) %>% 
+  mutate(med_bias = round(median - true_value,2),
+    mean_bias = round(mean - true_value,2),
+    .after = sd)
+
+summ_list[[3]] <- summ_table %>%
+  filter(type=="est") %>% 
+  select(!type) 
+names(summ_list) <- c("Bisection", "Bisection_Slider", "PEST")
+
+summ_list %>% 
+  bind_rows(.id = "est_type") %>% 
+  mutate(n_bisec = glue("{n_bisect}{PEST_type}", .na=""),
+         est_type = glue("{est_type}_{n_bisec}")) %>%
+  select(-c(starts_with("n"), PEST_type:max)) %>% 
+  arrange(variable) %>% 
+  rmarkdown::paged_table()
+```
+
+#### Time of Choice before Converged
+
+計算測量一個點要花多少個trial。
+中位數大約在14-20次之間，比bisection法測到極限(10次)相比大概要1.5-2倍的選擇次數。
+另 random initial 平均要花的次數稍多餘fixed initial (可能跟參數設定下真值比較靠近midpoint有關).
+
+```{r, rows.print=12}
+summ_table %>%
+  filter(type=="len") %>% 
+  select(1, variable:sd) %>% 
+  rmarkdown::paged_table()
+```
+
+#### 額外觀察: 起始值和選擇次數的影響
+
+目的是觀察起始值和選擇次數多寡的影響，看是否能夠用一些方式減少PEST的冗長實驗程序。
+針對case3 (Random Initial Value, Softmax Choice) 畫圖觀察，
+只看有看見$L$ 的起始值與選擇次數有較強的負相關
+(`r cor(PEST.results[[3]]["L_len"], PEST.results[[3]]["L_start"]) |> round(3)`)，
+此外看起來無太大影響。
+且負相關來源應該是模擬設定中 $L$ 真值和一開始 $L$ 的範圍上限(-4000)相隔太遠，導致在比較小的起始值會花比較久converge。
+
+```{r fig.height=9, fig.width=9, message=FALSE}
+PEST.results[[3]] %>% 
+  select(ends_with("start"), ends_with("est"),ends_with("len")) %>% 
+  GGally::ggpairs()+
+  theme_gray()+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Trace Plot
+
+觀察最後 7 次選擇的trace plot 觀察收斂情況 藍色區域為 95% CI。結果看起來
+對於有選擇不確定性的情況下最後幾次最好的收斂的區間比較難再降低。
+ 
+```{r converge, fig.height=9.5, fig.width=9.5}
+converg.plot <- function(lastnum = 7){
+  lastnum <- lastnum + 1
+  plot_list <- list()
+  select_last <- function(df) {
+    df %>%
+      mutate(across(L:x1neg,
+                    \(x) map(x, \(x) tail(x, lastnum)[-lastnum]),
+                    .names = "{.col}_last")) %>%
+      select(1, ends_with("last")) %>%
+      unnest(cols = ends_with("last")) %>%
+      mutate(last_trial =
+               rep(c(-(lastnum-1):-1), {{Nsim}})
+             )
+  }
+  # Some useful objects
+  PEST.list <- map(PEST.results, select_last)
+  limit.df <- PEST.list %>%
+    bind_rows(.id = "PEST_type") %>% 
+    summarise(
+      across(ends_with("last"),
+             list(max = max,
+                  min = min),
+             .names = "{str_remove(.col, '_last')}_{.fn}"))
+  for (i in 1:length(PEST.list)) {
+    df <- PEST.list[[i]]
+    df.name <- names(PEST.list)[i]
+    # CI dataframe
+    CI.summ <- df %>%
+      group_by(last_trial) %>%
+      summarise(across(
+        ends_with("last"),
+        list(
+          upper95 = ~ quantile(.x, .975),
+          lower95 = ~ quantile(.x, .025)
+        ),
+        .names = "{str_remove(.col, '_last')}_{.fn}"
+      ))
+    
+    for (pts in est) {
+      .y <-  glue(pts, "_last")
+      .y_CI <- paste(pts, c("lower95", "upper95"),sep="_")
+      ylim <- c(limit.df[[glue("{pts}_min")]],
+                limit.df[[glue("{pts}_max")]])
+      ylim <- round(ylim/50)*50
+      
+      plt <- df %>%
+        ggplot() +
+        geom_line(
+          aes(x = last_trial, y = !!sym(.y),
+              # color = Nsim,
+              group = Nsim),
+          color = "grey50",
+          linewidth = 1,
+          alpha = .15
+        ) +
+        geom_ribbon(data = CI.summ,
+          aes(x = last_trial, ymin = !!sym(.y_CI[1]), ymax = !!sym(.y_CI[2])),
+          fill = "cornflowerblue",
+          alpha = .65
+          ) +
+        theme(legend.position = "none") +
+        geom_point(
+          aes(x = last_trial, y = !!sym(.y)),
+          color = "grey30",
+          alpha = .2
+        ) +
+        geom_hline(
+          yintercept = opt[pts],
+          color = "red", lty = 2, lwd = 1
+        ) +
+        scale_x_continuous(breaks = scales::breaks_pretty()) +
+        scale_y_continuous(limits = ylim ,
+                           breaks =
+                             seq(ylim[1],
+                                 ylim[2],
+                                 50)
+                           ) +
+        # scale_colour_gradientn(colours = hcl.colors(10, alpha = .4))+
+        labs(title = pts,
+             subtitle = df.name,
+             y = pts)
+        
+      plot_list[[length(plot_list) + 1]] <- plt
+    }
+  }
+  combined_plot <- wrap_plots(plot_list, byrow = FALSE, ncol = 3) +
+    plot_annotation(title = glue("Last {lastnum-1} Choice Trace"))
+  combined_plot
+}
+converg.plot()
+```
+
+
+另附上所有情況下，根據總共選擇次數作圖的選擇紀錄的trace plot。
+
+```{r fig.height=8, fig.width=8}
+converg.plot.by_trials <- function() {
+  for (pts in est) {
+    for (i in 1:length(PEST.results)) {
+      p <- PEST.results[[i]] %>%
+        # select(Nsim, !!sym(pts), !!sym(glue("{pts}_len"))) %>%
+        mutate(trial = map2(!!sym(pts),!!sym(glue("{pts}_len")), ~ seq_len(.y))) %>%
+        unnest(cols = c(trial,!!sym(pts))) %>%
+        group_by(!!sym(glue("{pts}_len"))) %>%
+        ggplot(aes(trial,!!sym(pts))) +
+        geom_hline(yintercept = opt[pts],
+                   color = "red",
+                   lty = 2) +
+        geom_line(aes(group = Nsim)) +
+        facet_wrap(vars(!!sym(glue("{pts}_len"))))+
+        ggtitle(glue("{pts}_{names(PEST.results)[i]}"))
+      print(p)
+    }
+  }
+}
+converg.plot.by_trials()
+```
+
+
+
+```{r eval=FALSE, fig.height=8, fig.width=8, include=FALSE}
+# -----PEST plotiing  using base----
+PEST_plot <- function(df) {
+  est <- c("L", "x1pos", "x1neg")
+  suffix <- c("est", "len", "start")
+  par(mfrow =
+        c(3, 3),
+      mar = c(5, 4, 3, 2) + 0.1)
+  for (suf in suffix) {
+    for (point in est) {
+      .colname <- paste(point, suf, sep = "_")
+      fig.title <- glue::glue(" {suf} of {point} from PEST")
+      if (suf == "len") {
+        df %>%
+          pull({.colname}) %>%
+          table() %>%
+          barplot(main = fig.title,
+                  las = 1)
+      }
+      else{
+        df %>%
+          pull({.colname}) %>%
+          hist(
+            main = fig.title,
+            breaks = 15,
+            freq = F,
+            xlab = point
+          )
+      }
+      
+      if (suf == "est") {
+        abline(
+          v = opt[point],
+          col = "red",
+          lwd = 2,
+          lty = 2
+        )
+      }
+    }
+  }
+}
+for (i in 1:3){
+  PEST_plot(PEST.results[[i]])
+}
+
+PEST.results[[1]] %>% 
+  transmute(lambda = -x1pos_est/x1neg_est) %>% 
+  ggplot(aes(x=lambda))+
+  geom_histogram(bins=20, fill="grey",color="black", )+
+  geom_vline(xintercept = (-opt[2]/opt[3]), color="red", lty=2)+
+  ggtitle("Lambda estimate Using PEST")
+```
+
+# 總結與未來可能方向
+
+自模擬的結果，PEST 雖然要花約2倍以上時間來測量indifference points，但是 sd 看起來是比 bisection 小，
+且理論上來看也無選擇錯誤導致 biased 的情況發生。從這點來看 PEST 看起會比bisection是個更好的測量方法。
+
+之後應該可以比較 PEST 法和 bisection 上運用於 @abdellaoui2016 測量loss aversion的實證資料的估計情況。
+如果實證實驗上受試者選擇隨機性沒特別嚴重到影響估計結果，
+或許可以捨PEST用bisection-slider法，搭配多一些bisection的次數就好。
+
+另外又或者可以綜合 bisection 和PEST法看有沒有辦法可以減少PEST耗時的問題，又能避免 bisection在選擇隨機上的缺陷。
+
+
+---
+# References
