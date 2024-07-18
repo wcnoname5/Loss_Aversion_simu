@@ -145,6 +145,15 @@ PEST 類似staircase method，但也有像bisection一樣有將step size的改�
 >      - If a reversal follows a doubling of step size, then an extra same-sized step is taken after the original two, before doubling.
 > 3. A maximum size of step is specified, at least 8 or 16 times the size of the minimum step.
 
+Also, @ChoLuceWinterfeld1994 described PEST as:
+
+> 1. The initial step size was 1/2 of the difference of the maximum and minimum outcomes.
+> 2. Whenever the choice reversed (i.e., either from the gamble to the money or vice versa), the step size was halved.
+> 3. When there was no reversal, the step size either remained the same or changed according to the following subrules:
+>    - 3-1. After a sequence of three choices in the same direction, the step size was doubled, and it was repeatedly doubled until a reversal occurred.
+>    - 3-2. If a reversal followed a doubling of the step size, the step size was decreased by one half (Rule 2), and two more steps in the same direction were required in order to double the step size.
+> 4. When the step size reached 1/50 of the difference of the minimum and maximum outcomes, which was either $2 or $4, the test gamble was no longer presented. The choice CE was estimated to be the average of the lowest accepted sure amount and the highest rejected sure amount.
+
 
 ### Drawback
 主要和Bisection法最大的差異每個點需要測定的次數不固定(受到起始點和受試者的選擇隨機性影響)。也因此耗時，
