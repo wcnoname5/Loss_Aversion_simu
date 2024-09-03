@@ -577,9 +577,26 @@ summ_table <- map2(exp.result, n_bisec, summary_stats) %>%
     variable = factor(variable, levels = c(est, "lambda"))
   ) %>%
   arrange(variable)
+
 summ_list[[1]] <- summ_table
-summ_list[[1]] %>% rmarkdown::paged_table()
+
+summ_table %>%
+  rmarkdown::paged_table()
 ```
+
+#### Show sd and bias only 
+```{r}
+summ_table %>%
+  select(!c(mean, median, true_value)) %>% 
+  pivot_wider(names_from = variable,
+              values_from = sd:mean_bias,
+              names_glue = "{variable}_{.value}") %>% 
+  relocate(contains("bias"), .after = n_bisect) %>% 
+  rmarkdown::paged_table()
+  
+```
+
+
 
 ### Bisection bias 影響
 
@@ -745,6 +762,19 @@ summ_table <- map2(exp.result.slider, n_bisec, summary_stats) %>%
   arrange(variable) 
 summ_list[[2]] <- summ_table
 summ_table %>% rmarkdown::paged_table()
+```
+
+#### Show sd and bias only
+
+```{r}
+summ_table %>%
+  select(!c(mean, median, true_value)) %>% 
+  pivot_wider(names_from = variable,
+              values_from = sd:mean_bias,
+              names_glue = "{variable}_{.value}") %>% 
+  relocate(contains("bias"), .after = n_bisect) %>% 
+  rmarkdown::paged_table()
+  
 ```
 
 ### Check Convergence
@@ -1143,8 +1173,6 @@ PEST_plot2 <- function(df, opt, fix_xlim=T) {
 ```
 
 
-
-
 ### Summary Plots {.tabset .tabset-fade .tabset-pills}
 
 三種模擬情況的描述統計圖，可以看見大致都估計都 unbiased，而PEST收斂前需要
@@ -1298,13 +1326,6 @@ summ_list[[3]] <- summ_table %>%
   select(!type) 
 names(summ_list) <- c("Bisection", "Bisection_Slider", "PEST")
 
-summ_list %>% 
-  bind_rows(.id = "est_type") %>% 
-  mutate(n_bisec = glue("{n_bisect}{PEST_type}", .na=""),
-         est_type = glue("{est_type}_{n_bisec}")) %>%
-  select(-c(starts_with("n"), PEST_type:max)) %>% 
-  arrange(variable) %>% 
-  rmarkdown::paged_table()
 ```
 
 #### Time of Choice before Converged
@@ -1514,6 +1535,28 @@ PEST.results[[1]] %>%
   geom_histogram(bins=20, fill="grey",color="black", )+
   geom_vline(xintercept = (-opt[2]/opt[3]), color="red", lty=2)+
   ggtitle("Lambda estimate Using PEST")
+```
+
+
+## Summary Stat table
+
+```{r}
+summ_list %>% 
+  bind_rows(.id = "est_type") %>% 
+  mutate(n_bisec = glue("{n_bisect}{PEST_type}", .na=""),
+         est_type = glue("{est_type}_{n_bisec}")) %>%
+  select(-c(starts_with("n"), PEST_type:max)) %>% 
+  arrange(variable) %>% 
+  rmarkdown::paged_table()
+
+summ_list %>% 
+  bind_rows(.id = "est_type") %>% 
+  filter( !(n_bisect %in% 1:9) ) %>%
+  mutate(Type = glue("{est_type}{PEST_type}", .na="")) %>% 
+  select(-c(est_type, n_bisect,true_value , starts_with("n"), mean, median,PEST_type:max)) %>%  
+  pivot_wider(names_from = variable,
+              values_from = sd:mean_bias) %>% 
+  rmarkdown::paged_table()
 ```
 
 # 總結與未來可能方向
