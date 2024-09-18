@@ -636,6 +636,85 @@ exp.result[[4]] %>%
  
 ```
 
+#### Full Trace plot for Bisection method
+```{r}
+converg.plot.bisec <- function(){
+   plot_list <- list()
+  # Some useful objects
+  limit.df <- exp.result %>%
+    bind_rows(.id = "Bisection_times") %>%
+    summarise(
+      across(L:x1neg,
+             list(max = max,
+                  min = min),
+             .names = "{.col}_{.fn}"))
+  for (i in 1:length(exp.result)) {
+    df <- exp.result[[i]]
+    df.name <- df %>% 
+      pull(Bisection) %>%
+      {\(x) max(x)-1}()
+    # CI dataframe
+    CI.summ <- df %>%
+      group_by(Bisection) %>%
+      summarise(across(
+        L:x1neg,
+        list(
+          upper95 = ~ quantile(.x, .975),
+          lower95 = ~ quantile(.x, .025)
+        ),
+        .names = "{.col}_{.fn}"
+      ))
+    
+    for (pts in est) {
+      .y <-  pts
+      .y_CI <- paste(pts, c("lower95", "upper95"),sep="_")
+      ylimit <- c(limit.df[[glue("{pts}_min")]],
+                limit.df[[glue("{pts}_max")]])
+      ylimit <- round(ylimit/50)*50
+      
+      plt <- df %>%
+        ggplot() +
+        geom_line(
+          aes(x = Bisection-1, y = !!sym(.y),
+              # color = Nsim,
+              group = Nsim),
+          color = "grey50",
+          linewidth = 1,
+          alpha = .15
+        ) +
+        geom_ribbon(data = CI.summ,
+          aes(x = Bisection-1, ymin = !!sym(.y_CI[1]), ymax = !!sym(.y_CI[2])),
+          fill = "cornflowerblue",
+          alpha = .65
+          ) +
+        theme(legend.position = "none") +
+        geom_point(
+          aes(x = Bisection-1, y = !!sym(.y)),
+          color = "grey30",
+          alpha = .2
+        ) +
+        geom_hline(
+          yintercept = opt[pts],
+          color = "red", lty = 2, lwd = 1
+        ) +
+        scale_x_continuous(breaks = scales::breaks_pretty()) +
+        scale_y_continuous(limits = ylimit,
+                           n.breaks=10) +
+        # scale_colour_gradientn(colours = hcl.colors(10, alpha = .4))+
+        labs(title = pts,
+             subtitle = glue("Bisection = {df.name}"),
+             y = pts)
+        
+      plot_list[[length(plot_list) + 1]] <- plt
+    }
+  }
+  combined_plot <- wrap_plots(plot_list, byrow = FALSE, ncol = 4) +
+    plot_annotation(title = glue("Bisection Choice Trace"))
+  combined_plot
+}
+converg.plot.bisec()
+```
+
 ## w/ slider {.tabset}
 
 ### Historgram
