@@ -173,6 +173,7 @@ Game <- R6Class(
     # Attribute for ASA
     m_shift = 0L, 
     choice_histroy = list(),
+    converge = FALSE,
     
     # Methods
     ## bisection: suppose x in [x0, x0+delta]
@@ -283,13 +284,13 @@ Game <- R6Class(
     },
     ## ASA
     ASA_update = function(choice,
-                          last_point, cur_task, cur_trial,
+                          last_point, cur_task, cur_trial
                           ){
       ## Current response, see Treutwein, (1995)
       Zn <- ifelse(cur_trial == 1, # L
                    as.numeric(choice == "A"),
                    as.numeric(choice == "B"))
-      
+      # print(private$m_shift)
       if (cur_task == 1) {
         private$step <- 320L #c
         private$m_shift <- 0L # times of reversal
@@ -300,7 +301,7 @@ Game <- R6Class(
         }
         private$last.choose <- c(choice)
       }
-      new_point <- last_point - (private$step/(2+m_shift) *(Zn - .5))
+      new_point <- last_point - (private$step/(2+private$m_shift) *(Zn - .5))
       return(new_point)
     }
   ),
@@ -393,7 +394,6 @@ Game <- R6Class(
     # Generate a new pair of lotteries.
     generate_lotteries = function(cur_trial, cur_task) {  
       G <- private$init_values["G"]
-      # if (private$est_type == "PEST"){
       if (private$est_type == "PEST" | private$est_type == "ASA"){
         if (cur_trial == 1) {  # L
           .A <- c(G, self$show_task_log()[["L"]][cur_task])
@@ -430,22 +430,27 @@ Game <- R6Class(
     update_task_log = function(choice, cur_trial, cur_task,
                                phi, random_init=FALSE) {
       # The function takes the choice of players, does the computation, and update the task log.
-      # if (private$est_type == "PEST"){
       if (private$est_type == "PEST" | private$est_type == "ASA"){
         last <- private$task_log[[cur_trial]][cur_task]
-        value <- private$PEST_update(choice, last_point = last,
+        if (private$est_type == "PEST"){
+          value <- private$PEST_update(choice, last_point = last,
                                      cur_trial = cur_trial, cur_task = cur_task)
+        }else{
+          value <- private$ASA_update(choice, last_point = last,
+                                       cur_trial = cur_trial, cur_task = cur_task)
+        }
         private$task_log[[cur_trial]][cur_task + 1] <- value
         private$choice_histroy[[cur_trial]][cur_task] <- choice
-        if ( (private$step < 5) & (cur_trial == 2)){ # end of x1+, initialize x1neg[1]
+        # print(c(cur_trial, cur_task))
+        if ( (cur_task == 1) & (cur_trial == 2)){ # end of x1-, initialize x1neg[1]
           L.vec <- self$show_task_log()[["L"]]
           L <- L.vec[length(L.vec)]
-          private$task_log[["x1neg"]][1] <- ifelse(random_init,
-                                                   runif(1, L, 0) |> {\(x) round(x/5)*5}(),
-                                                   round((L+0)/2))
+          private$task_log[["x1neg"]][1] <- 
+            ifelse(random_init,
+                   runif(1, L, 0) |> {\(x) round(x/5)*5}(),
+                   round((L+0)/2))
         }
-      }
-      else{
+      }else{
         # Update the current value
         bisec_pts <- private$task_log[, cur_trial]
         value <- private$bisection_update(choice, bisec_pts, cur_task, cur_trial,
@@ -473,6 +478,7 @@ Game <- R6Class(
       result <- rep(0L, 2)
       log <- private$task_log
       if (private$est_type == "PEST" | private$est_type == "ASA"){
+        # print(log)
         result[1] <- log[["x1pos"]][ length(log[["x1pos"]]) ]
         result[2] <- log[["x1neg"]][ length(log[["x1neg"]]) ]
       }
@@ -483,7 +489,10 @@ Game <- R6Class(
       names(result) <- paste0("x1", c("+","-"))
       return(result)
     },
-    reset_step = function() private$step <- 320L ,
+    reset_step = function() {
+      private$step <- 320L
+      private$m_shift <- 0
+    } ,
     show_step = function() private$step,
     show_ASA_step = function() private$step/(2*(2+private$m_shift)),
     show_bound = function() private$bound,
@@ -523,46 +532,48 @@ experiment = function(params, #alpha, beta, lambda, wp, wn,
                                       ),
                       phi, u_func = c("CRRA", "CARA"),
                       est_type = c("Bisection", "Bisection-Slider", "PEST", "ASA"),
-                      task_log=FALSE, random_init = FALSE) {  # Given player's attribute
+                      task_log=FALSE, random_init = FALSE,
+                      converg_crit = 5L) {  # Given player's attribute
   u_func <- match.arg(u_func)
   est_type <- match.arg(est_type)
 
   slider <- (est_type == "Bisection-Slider")
   # Initialization
   player <- Player$new(params, phi, u_func)
-  game <- Game$new(exp_params, est_type, random_init = random_init)
+  game <- Game$new(exp_params, est_type,
+                   random_init = random_init)
   # Start the experiment
   for (trial in 1:game$show_setting()[1]) { # no. of estimated quantities
     if (est_type == "PEST"){
       task <-  0L
       game$reset_step()
-      while ( game$show_step() >= 5) {
+      while ( game$show_step() >= converg_crit) {
         task <- task + 1L
-        cur_lotteries <- game$generate_lotteries(trial, task) # (->Lottery class object)
+        cur_lotteries <-
+          game$generate_lotteries(trial, task) # (->Lottery class object)
         # update lottery by player's choice
         player$input_choice(cur_lotteries,
                             slider = F,
                             trial = trial) 
         game$update_task_log(cur_lotteries$result, trial, task, phi = phi,
-                             random_init = random_init) # bisection
+                             random_init = random_init)
       }
-    }
-    else if (est_type == "ASA"){
+    }else if (est_type == "ASA"){
       # TODO
       task <-  0L
       game$reset_step()
-      while ( game$show_ASA_step() >= 5) {
+      while ( game$show_ASA_step() >= converg_crit) {
         task <- task + 1L
-        cur_lotteries <- game$generate_lotteries(trial, task) # (->Lottery class object)
+        cur_lotteries <-
+          game$generate_lotteries(trial, task) # (->Lottery class object)
         # update lottery by player's choice
         player$input_choice(cur_lotteries,
                             slider = F,
                             trial = trial) 
         game$update_task_log(cur_lotteries$result, trial, task, phi = phi,
-                             random_init = random_init) # bisection
+                             random_init = random_init)
         }
-    }
-    else{
+    }else{
       for (task in 1:game$show_setting()[2]) { # no. of bisection
         cur_lotteries <- game$generate_lotteries(trial, task) # (->Lottery class object)
         # update lottery by player's choice
