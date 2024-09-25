@@ -1,7 +1,6 @@
 # packages
 library(R6)
 
-
 # Player ------------------------------------------------------------------
 
 # `Player` 有 4 個 private attributes：`alpha`、`beta` 和 `lambda`、`phi`。
