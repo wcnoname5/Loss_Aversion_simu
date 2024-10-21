@@ -32,14 +32,13 @@ Game <- R6Class(
     # Attribute for UD (up-down)
     is.mix = FALSE,
     UD_param = list(),
-    # delta = 20L,
-    # stop_rev_times = 5L,
     step_size = 320L,
     choice_history = list(),
     
     # Methods
     ## Initialization:
-    init_log = function(est_type, G, random_init, step_size, ...){
+    init_log = function(est_type, G, random_init,
+                        step_size, ...){
       # extra_args <- list(...)
       private$step_size <- step_size
       if (est_type %in% c("Bisection", "Bisection-Slider")){
@@ -75,10 +74,10 @@ Game <- R6Class(
       private$task_log <- list(
         "L" = ifelse(!random_init,
                      -G,
-                     runif(1, -2 * G, 0) |> {\(x) x %/% 5 * 5}()),
+                     runif(1, -2 * G, 0) |> round_to_5()),
         "x1pos" = ifelse(!random_init,
                          (0 + (G)) / 2,
-                         runif(1, 0, G) |> {\(x) x %/% 5 * 5}()),
+                         runif(1, 0, G) |> round_to_5()),
         "x1neg" = c()
       )
       private$choice_history <- list("L" = c(),
@@ -104,7 +103,7 @@ Game <- R6Class(
         if (is.na(phi)){
           new_stim <- choice |> as.integer()
         }else{
-          new_stim <- rnorm(1, mean = choice, sd = (1/phi)*5)|>
+          new_stim <- rnorm(1, mean = choice, sd = 20L)|>
             as.integer()
           # boundary conditions
           if ((new_stim >= new_bound[1]) && (new_stim <= new_bound[2])){
@@ -143,32 +142,26 @@ Game <- R6Class(
       change_option <- ifelse(cur_est == 1,
                                 "A",
                                 "B")
-      upper <- ifelse(choice == change_option,
+      next_upper <- ifelse(choice == change_option,
                       sum(boundary) %/% 2,
                       boundary[2])
-      lower <- ifelse(choice == change_option,
+      next_lower <- ifelse(choice == change_option,
                       boundary[1],
                       sum(boundary) %/% 2)
-      cat("Low Stack; High Stack \n")
-      cat(low_stack); cat("; ")
-      cat(high_stack); cat("\n ")
-      print(private$consis_check)
-      cat(choice);cat("; "); cat(c(lower, upper)); cat("\n")
       if (private$consis_check) {
         ## TODO: bug in first stimuli in which()
-        ## Update log
+        # Find choice history
         tasklog <- private$task_log[[cur_est]]
-        
-        # Check Consistency
         last_stim <- tasklog[cur_trial]
         idx <- which(tasklog == last_stim)
+        # Check consistency with choice history
         notConsis <-
           ifelse(
             length(idx)==1 , # not chosen before
             FALSE,
             (private$choice_history[[cur_est]][idx[1]] != choice)
           )
-        # Regression: Not Consistent
+        # If Not Consistent: regression
         ## Update Stacks 
         if (notConsis && (choice == change_option)){
           private$bound_hist[[cur_est]][["low"]] <- 
@@ -177,32 +170,43 @@ Game <- R6Class(
           private$bound_hist[[cur_est]][["up"]] <- 
             c(high_stack[-1], 0L)
         }
+        # else: not update stacks
         private$consis_check <- FALSE
+        
+        # Prepare next stimulus (use updated stack)
+        low_stack <- private$bound_hist[[cur_est]][["low"]]
+        high_stack <- private$bound_hist[[cur_est]][["up"]]
+
         new_stim <- (low_stack[1] + high_stack[1]) %/% 2
       } else {
+        # Update Stacks 
+        if (choice == change_option){
+          private$bound_hist[[cur_est]][["up"]] <- 
+            c(next_upper, high_stack)[-4]
+        } else{
+          private$bound_hist[[cur_est]][["low"]] <- 
+            c(next_lower, low_stack)[-4]
+        }
+        
         # Should next trial check consistency? 
+        #> check if same choices
         private$consis_check <-
           ifelse(is.na(private$last_choice),
                  FALSE,
-                 choice == private$last_choice # same choices
+                 choice == private$last_choice
                  )
-        
+        # Prepare next stimulus
         new_stim <- ifelse(!private$consis_check,
-                           (low_stack[1] + high_stack[1]) %/% 2,
+                           (next_upper + next_lower) %/% 2,
                            ifelse(choice == change_option,
-                                  low_stack[1],
-                                  high_stack[1])
+                                  next_lower,
+                                  next_upper)
                            )
-        # Update Stacks 
-        private$bound_hist[[cur_est]][["up"]] <- 
-          c(upper, high_stack)[-4]
-        private$bound_hist[[cur_est]][["low"]] <- 
-          c(lower, low_stack)[-4]
       }
-      # update choice
-      # print(c(choice, private$last_choice))
+      # update choice history
       private$last_choice <- choice
-      print(new_stim)
+      # TODO: round to 5?
+      # new_stim <- round_to_5(new_stim)
       return(new_stim) # return bisection iteration value
     },
     ## PEST
@@ -253,7 +257,7 @@ Game <- R6Class(
       if (cur_est == 1) {  # L
         direction <- -direction
       }
-      new_stim <- last_stim + direction * round(private$PEST_step / 5) * 5
+      new_stim <- last_stim + direction * round_to_5(private$PEST_step)
       return(new_stim)
     },
     ## ASA
@@ -281,6 +285,7 @@ Game <- R6Class(
       step <- round(step) # not force multiples of 5
       private$ASA_step <- abs(step)
       new_stim <- last_stim - step
+      # new_stim <- round_to_5(new_stim)
       return(new_stim)
     },
     # Up-down method
@@ -291,26 +296,39 @@ Game <- R6Class(
                    as.integer(choice == "B"))
       last_choice <- private$last_choice
       lc_len <- length(last_choice)
-      
-      # TODO: first trial of UD
+      log <- private$task_log[[cur_est]]
+      delta <-  private$UD_param$delta
+      step_size <- diff(
+        log[c(length(log), (length(log)-1))]
+        ) |>
+        abs()
+      shift_count <- private$UD_param$UD_shift
+      stop_criterion <- private$UD_param$stop_rev_times
+      # Reversal: update reversal times and reversal hist 
       if (choice != last_choice[lc_len]){
         private$UD_param$UD_shift <-
           private$UD_param$UD_shift + 1L
-        
         private$UD_param$shift_hist <- 
           c(private$UD_param$shift_hist, last_stim)
       }
+      #Update new stimuli
+      if (shift_count >= stop_criterion &&
+          (step_size == delta)){
+        # Final estimate: midrun/last stimuli
+        if (private$UD_param$UseMidrunEst){
+          new_stim <- mean(private$UD_param$shift_hist)|>
+            round()
+        } else { 
+          new_stim <- last_stim
+        }
+        
+      } else {
+        # If last step > delta, use UD_update not midrun estimate
+        new_stim <- 
+          last_stim - delta*(2L*Zn - 1) 
+      }
       # Update Last Choice:
       private$last_choice <- c(choice)
-      
-      if (private$UD_param$UD_shift >= private$UD_param$stop_rev_times){
-        # midrun estimate
-        new_stim <- mean(private$UD_param$shift_hist)|>
-          round()
-      } else {
-        new_stim <- 
-          last_stim - private$UD_param$delta*(2L*Zn - 1) 
-      }
       return(new_stim)
     }
   ),
@@ -319,8 +337,6 @@ Game <- R6Class(
     initialize =
       function(exp_params,
                est_type = est_mehods,
-               step_size = 320L,
-               random_init = FALSE,
                ...) {
         extra.arg <- list(...)
         if (!is.null(extra.arg$mix_param)){
@@ -330,15 +346,24 @@ Game <- R6Class(
              UD_shift = 0L, # shift count
              shift_hist = c(), # shifted-stimuli
              delta = extra.arg$mix_param$UD_delta,
-             stop_rev_times = extra.arg$mix_param$stop_rev_times
+             stop_rev_times = extra.arg$mix_param$stop_rev_times,
+             UseMidrunEst = ifelse(is.logical(extra.arg$mix_param$UseMidrunEst),
+                                   extra.arg$mix_param$UseMidrunEst,
+                                   TRUE)
            )
         }
         est_type <- match.arg(est_type)
+        private$slider <- (est_type == "Bisection-Slider")
         private$est_type <- est_type
         private$init_values <- exp_params$init_values
-        private$slider <- (est_type == "Bisection-Slider")
         # Initialize task_log
         G <- exp_params$init_values[["G"]]
+        random_init <- ifelse(is.logical(exp_params$random_init),
+                              exp_params$random_init,
+                              FALSE)
+        step_size <- ifelse(is.numeric(exp_params$step_size),
+                            exp_params$step_size,
+                            320L)
         private$init_log(est_type, G, random_init,
                          step_size)
       },
@@ -369,6 +394,11 @@ Game <- R6Class(
         .B <- rep(self$show_task_log()[["x1neg"]][cur_trial], 2)
       }
       lottery_values <- list(".A" = .A, ".B" = .B)
+      if (is.na(.A) || is.na(.B)){
+        print(c(cur_est, cur_trial))
+        print(lottery_values)
+        stop("NA Lotteries Created in `generate_lotteries()`")
+      }
       new_lotteries <- Lotteries$new(lottery_values)
       return(new_lotteries)
     },
@@ -386,16 +416,16 @@ Game <- R6Class(
       } else if (private$est_type == "PEST") {
         value <- private$PEST_update(choice, last_stim = last,
                                    cur_est, cur_trial)
-      }else if (private$est_type == "ASA") {
+      } else if (private$est_type == "ASA") {
         value <- private$ASA_update(choice, last_stim = last,
                                      cur_est, cur_trial)
 
-      }else if (private$est_type == "MOBS") {
+      } else if (private$est_type == "MOBS") {
         value <-
           private$MOBS_update(choice, 
                               cur_est = cur_est,
                               cur_trial = cur_trial)
-      }else if (private$est_type %in% c("Bisection", "Bisection-Slider")){
+      } else if (private$est_type %in% c("Bisection", "Bisection-Slider")){
         value <-
           private$bisection_update(choice, cur_est, cur_trial, phi = phi)
       }
@@ -405,27 +435,31 @@ Game <- R6Class(
       private$choice_history[[cur_est]] <-
        c(private$choice_history[[cur_est]], choice)
 
-      #> end of x1-, initialize x1neg[1]
-      if ((cur_trial == 1) && (cur_est == 2)) { 
+      # end of x1-, initialize x1neg[1]
+      if ((cur_est == 2) && (cur_trial == 1)) { 
         L.vec <- self$show_task_log()[["L"]]
         L <- L.vec[length(L.vec)]
+        #> Update for Bisection
         if (private$est_type %in%  c("Bisection", "Bisection-Slider")) {
           private$bound_hist[["x1neg"]][["low"]] <- L
-        }else if (private$est_type == "MOBS") {
+        } else if (private$est_type == "MOBS") {
           # low stack
           private$bound_hist[["x1neg"]][["low"]] <- rep(L, 3)
         }
+        # To avoid extreme cases that L>0
         private$task_log[["x1neg"]][1] <-
-          ifelse(random_init,
-                 runif(1, L, 0) |> {\(x) x %/% 5*5}(),
+          ifelse( ((random_init) && (L<0)),
+                 runif(1, L, 0) |> round_to_5(),
                  (L+0) %/% 2)
       }
       # For mixture, initialize the UD
-      .step <- self$show_step(private$est_type, cur_est = cur_est)
       if (private$is.mix){
+        .step <- self$show_step(
+          private$est_type,
+          cur_est)
         # Condition of Starting UD
         private$UD_param$UD_start <-
-          .step <= private$UD_param$delta*4 # 
+          .step <= private$UD_param$delta*4 # <=80L
       }
     },
     output_exp_result = function() {

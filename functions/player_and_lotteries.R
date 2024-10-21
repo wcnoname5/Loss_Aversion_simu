@@ -242,6 +242,18 @@ inv_utility <- function(u, params = list("alpha"=.88, "beta"=.88, "lambda"=2.25,
   return(round(res))
 }
 
+# other functions  --------------------------------------------------------
+
+round_to_5 <- function(x, multiples= 5L){
+  if (!is.numeric(x)){
+    stop("Input is not numeric")
+  }
+  ifelse(x>=0,
+    ceiling(x / multiples)*multiples,
+    (x %/% multiples)*multiples
+  )
+}
+
 find_optimal_params <- function(
     params = list("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5),
     exp_param = list("G"=2000L, "L_lc"= -300L, "G_lc" = 300L),

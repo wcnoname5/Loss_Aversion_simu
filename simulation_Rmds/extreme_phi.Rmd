@@ -1,0 +1,575 @@
+---
+title: "Examing Bisection: Extreme phi"
+author: "Wei-Chen Chang"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+     toc: true
+     toc_depth: 2
+     toc_float: true
+     code-link: true
+     code-tools: true
+     code_folding: show
+     code_download: true
+     code-overflow: "scroll"
+     self-contained: true
+     number_sections: true
+bibliography: "CPT_LA_new.bib"  
+csl: "apa.csl"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	fig.align = "center",
+	warning = FALSE,
+	rows.print=11
+)
+```
+
+```{r lib, message=FALSE, include=FALSE}
+library(tidyverse)
+library(DT)
+library(glue)
+library(magrittr)
+library(patchwork)
+# import functions
+# source("../functions/game_and_exp.R")
+source("../functions/TO_exp.R")
+# source("../functions/loss_aver_functions.R")
+theme_set(theme_bw())
+```
+
+# Overview of @abdellaouiMeasuring2016 experiment Settings
+ 
+
+<center>
+<img src="../pics/A2016_TO.png" alt="TO_exp" width="512"/>
+</center>
+
+
+3 equivalence needed to elicit. 
+$$
+\begin{align}
+(G, .5; \mathbf{L}) &\sim 0\\
+(G, .5; 0) &\sim \mathbf{x_1^+}\\
+(0, .5; L) &\sim \mathbf{x_1^-}\\
+\end{align}
+$$
+
+## Bisection Method
+
+@abdellaouiParameterFree2000, @abdellaouiLoss2007, @abdellaouiMeasuring2016 等文章皆有使用，@abdellaouiParameterFree2000 該篇描寫較為詳盡，以下解讀多是參考該篇。
+
+
+### General Case:
+
+假設現在要找一數 $y$, 且已知$y$介於區間$[l,u], l<u$之間，  bisection method 如下:
+
+1.  設定Starting value為中點
+    * $y\leftarrow \frac{(l+u)}{2}$
+
+2.  根據受試者的選擇決定y的範圍要如何縮小
+    * 如果包含y的選項(lottery)被選擇，代表 y 比較吸引人，下次更新應該數值應該要比現在小，更新區間$[l, u]$中upper bound: $u\leftarrow \frac{(l+u)}{2}$。
+    * 反之亦然，若**不**包含y的選項(lottery)被選擇，更新區間$[l, u]$中lower bound: $l\leftarrow \frac{(l+u)}{2}$
+  
+3.    Assign y 為新的區間中之中點(如1. )，回到2.，直到設定的bisection 次數結束。
+
+**Note:** It might be the most efficient (least iterations needed to attain certain precision) compare to all other methods. 
+
+### 實例: TO實驗中
+
+實驗中要測得的$L, x_1^+, x_1^-$，可以由觀察得到 $L \in (-\infty, 0)$,
+$x_1^+ \in (0, G)$, $x_1^- \in (L, 0)$ (滿足Stochastic dominance)。其中為了讓$L$有下界，
+直接參照 @abdellaouiMeasuring2016 之作法，設定 $L \in (-2G, 0)$, 且 $L$的初始值直接是$-G$。
+
+
+### Drawback:
+
+Bisection 透過中點對半切的方式來快速縮減到所求數值，不過一旦沒有選中的那半邊永遠
+沒辦法再被探索到。因此受試者只要有一次選擇「錯誤」，不管之後再進行多少次bisection
+，最後的估計都會是biased。這點也可從之後的模擬稍微看見。
+
+## Slider(scrollbar)
+
+@abdellaouiMeasuring2016 採用的是先進行三次bisection縮減區間後，再讓受試者直接選擇
+indifference point. 但為了讓受試者可以有犯錯的機會，最後使用的slider區間有動一點手腳變寬，如下:
+
+假設bisection結束後得到區間為$[l_B, u_B], l_B<u_B$, 且令$\Delta = u_B-l_B$,
+則受試者使用Slider限定的區間$[l_s,u_s] = [l_B-\Delta, u_B+\Delta].$
+
+### Potential Drawback:
+
+bisection法這類choice-based原先就是擔心slider 這種 matching 法(見 @bosticEffect1990)
+可能有bias 所因應。現縮減範圍後再使用slider或許無法消除bias，只是限制bias的大小
+不要太超過而已。
+
+# Simulation Setting
+
+```{r params}
+# Simulation Parameters
+Nsim <- 1000
+param = list("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5)
+exp_param = list(
+  init_values =
+    c("G"= 2000L,
+      "g"=300L, "l"=-300L, "x1+"=1000L),
+  random_init = FALSE,
+  stop_crit = 5L,
+  step_size = 320L
+)
+mix_param = list(UD_delta = 20L, # step size change to UD method
+                 stop_rev_times = 3L,
+                 UseMidrunEst = TRUE) # time for reversal
+err = c(0.1, 0.05, 0.01, 0.001, 1e-4, 1e-6, 1e-8)
+```
+
+## Agent
+
+模擬的agent做出每個選擇主要有 2 個部分，如下:
+
+1. agent 計算每個lottery 的價值是依據 Cumulative Prospect Theory [@tverskyAdvances1992]
+
+2. agent 根據計算兩個lottery之間價值的差異，最後以lottery function轉換，產出選擇每個lottery的機率，再根據此機率進行選擇
+
+另外，這部分模擬主要操弄的是Bisection 次數、以及是否在最後一次使用slider進行選擇，每一個情況下**皆重複 1000 次**。
+
+下面小節會描述這些模擬實作上的細節。
+
+### CPT:
+
+Following @tverskyAdvances1992, using power family utility function 
+$U(x)=\begin{cases}x^{\alpha},\;x\geq 0\\-\lambda |x|^{\beta},\;x<0 \end{cases}$,
+with parameter values: $\alpha=\beta=0.88;\lambda=2.25$, and set both gain and loss weighting function for 0.5 as
+0.5, i.e.,
+$w^+(0.5)=w^-(0.5)=0.5.$
+
+
+```{r find_optimal, include=FALSE}
+opt <- find_optimal_params(params = 
+                             list("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5))
+opt
+```
+Under such setting, $L=-796$, $x_1^+=910$, $x_1^-=-362$ (rounding to integer) theoretically,
+and the KW loss aversion coefficient $\lambda= \frac{-x_1^+}{x_1^-}$
+(@kobberlingIndex2005; @abdellaouiMeasuring2016) is `r -opt[4]|> round(3)`.
+
+### Choice Rule:
+
+模擬選擇的random error, follow softmax choice rule:
+
+$$
+\text{Let } \Delta = \text U(A)-\text U(B),\\
+\text{Pr}(A) = \sigma(\Delta|\phi)=\frac{1}{1+\exp(-\phi\Delta)} \quad\text{(softmax)}
+$$
+$\phi$越大，選擇越決定性; 反之，越小越隨機。
+
+過去從 @nilssonHierarchical2011, @glocknerCognitive2012 的實驗中，估計$\phi$的大小約為
+$0.1$ 或更小一些。
+
+另藉由 @abdellaouiMeasuring2016 中 Consistency Check 部分報告的數值，及其提供之CPT 參數式，能粗略估計出實驗中$\phi$大小。與 @nilssonHierarchical2011, @glocknerCognitive2012 的估計量相比更小，原因可能是與另兩篇相比 @abdellaouiMeasuring2016 使用的刺激(lottery)數值更大許多。
+
+### Adjust $\phi$ To show the short of Bisection:
+
+Bisection may raise (irreversible) error on final estimate if a choice not conformed to underlying utility were made. To show this, we adjust $\phi$ such that the probability an ideal agent made a mistake on 1st choice of $L$ is $`r err`$ respectively.
+
+Under these extreme cases, we run the simulations to compare the performance of Bisection and other methods. 
+
+#### How to find $\phi$?
+
+On the 1st choice of $L$, the agent faces:
+$$
+(G,.5; -G)\quad? \quad 0  
+$$
+given the first intensity of $L$ is midpoint of $(0, -2G)$, where $G = 2000$.
+
+Hence the Probability of choosing left is:
+
+$$
+\frac{1}{1+\exp(-\phi\Delta)} =\frac{1}{1+\exp\{-\phi[w^+(.5)U(G)+ w^-(.5)U(-G) -0]\}}
+$$
+Let the desired error rate be $\epsilon$, one only needs to set the fraction above to $\epsilon/(1-\epsilon),$ can then attain corresponding $\phi$. 
+
+The code chuck below implement the way to adjust $\phi$.
+
+```{r find_phi}
+softmax <- function(dU, phi){
+  if (dU>=0){
+    1/(1+exp(-dU * phi)) 
+  } else{
+    1/(1+exp(dU * phi))
+  }
+}
+
+solve_phi <- function(dU, target = 0.1) {
+  # Define the equation you want to solve, i.e., softmax(dU, phi) - target = 0
+  equation <- function(phi) {
+    softmax(dU, phi) - (1-target)
+  }
+  # Use uniroot to find phi, searching within a range for phi (e.g., [-10, 10])
+  result <- uniroot(equation, lower = -1, upper = 1)
+  # Return the value of phi that solves the equation
+  result$root
+}
+wn <- param$wn
+wp <- param$wp
+
+# delta U in first choice of L in bisection 
+dU_1st <- (utility(2000, params = param ,"CRRA") * wp) + 
+  (utility(-2000, params = param ,"CRRA")* wn)
+rm(wn, wp)
+
+for (i in 1:length(err)){
+  if (i==1){
+    phi_vec <- solve_phi(dU_1st, err[i])
+  } else{
+    phi_vec <- c(phi_vec, solve_phi(dU_1st, err[i]))
+  }
+}
+```
+
+From the computation above, we see $\phi$ be $`r phi_vec`$ respectively. 
+
+Note $\phi$ based on @abdellaouiMeasuring2016 report is close to error rate $=0.1$% or less (see `phi_seeking.R`).
+
+## Methods
+
+模擬主要探討數種方法，分別是 Bisection, Bisection-Slider, MOBS, PEST, ASA, mixture。
+
+### Bisection and Bisection-Slider
+
+General description of these methods were explained above. Here only provides the simulation details. 
+
+-   為了和其他方法做比較，Stopping criterion 設定為final Step Size < $5$ 則停止/進入 Slider task
+
+-   若使用 slider，最後選擇的 indifferent point 由一 normal distribution 產生(四捨五入到整數)
+
+  -   mean 是 CPT 算出的理論值，sd 設定為$20$。
+  
+  -   若產生的數字超出 bisection 找出的範圍，則設定成 boundary。
+
+### MOBS (The Modified Binary Search)
+
+Proposed by @tyrrellRapid1988. A detailed description can be seen in @andersonComparison2006.  
+
+This is a modification of bisection (binary search) method. Simply put, in MOBS, the stimuli wouldn't always be the midpoint of the boundary, sometimes jump to boundary itself under some conditions. So the wrongly-chosen problem in bisection should be solved under such setting. A short critic can be seen in @treutweinAdaptive1995.
+
+### PEST
+
+PEST 類似staircase method，但也有像bisection一樣有將step size的改變。
+主要規則是受試者的選擇只要產生轉折(reversal)，就會將step size減半；若選擇方向不變，則step size維持(除了某些例外)。而只要step size最終縮小到一定程度，PEST就停止。
+
+詳細描述如下[@bosticEffect1990].
+
+> 1. Each time the direction of stepping changes (a reversal), halve the step size.
+> 2. A step in the same direction as the last step uses the same size of step as previously, with the following exceptions:
+>    - A third step in the same direction calls for a doubled step, and each successive step in the same direction is also doubled until the next reversal. This rule has its own exceptions:
+>      - If a reversal follows a doubling of step size, then an extra same-sized step is taken after the original two, before doubling.
+> 3. A maximum size of step is specified, at least 8 or 16 times the size of the minimum step.
+
+
+Also, @choTests1994 described PEST as below. The main difference is the determination of initial step size.
+
+> 1. The initial step size was 1/2 of the difference of the maximum and minimum outcomes.
+> 2. Whenever the choice reversed (i.e., either from the gamble to the money or vice versa), the step size was halved.
+> 3. When there was no reversal, the step size either remained the same or changed according to the following subrules:
+>    - 3-1. After a sequence of three choices in the same direction, the step size was doubled, and it was repeatedly doubled until a reversal occurred.
+>    - 3-2. If a reversal followed a doubling of the step size, the step size was decreased by one half (Rule 2), and two more steps in the same direction were required in order to double the step size.
+> 4. When the step size reached 1/50 of the difference of the minimum and maximum outcomes, which was either $2 or $4, the test gamble was no longer presented. The choice CE was estimated to be the average of the lowest accepted sure amount and the highest rejected sure amount.
+
+
+#### Setting of PEST
+
+1. Initial step size: $320$, maximum 為 $1280$。
+
+2. Criterion of Convergence: 接受最小step size 為 $5$ ，只要最後一次reversal造成step size 減半後小於$5$，就停止PEST，以最後一次選擇的值作為indifferent的估計。
+
+3. Starting point: 
+  
+  - midpoint starting point: 與 Bisection 相符，以中點為起始點
+  
+  - random starting point(`randInit`): 在可能區間內以均等分配挑一點做為起始點
+
+### ASA
+
+Proposed by @kestenAccelerated1958. Also see equation $(15)$ and $(16)$ in @treutweinAdaptive1995 for a review. 
+
+$n+1$ 回合的刺激大小$X_{n+1}$的更新規則如下:
+
+$$
+X_{n+1} = 
+\begin{cases}
+  X_n - \frac{c}{n}(Z_n-\phi), & n=1,2.\\
+  X_n - \frac{c}{2+m_\text{shift}}(Z_n-\phi), & n>2.
+\end{cases}
+$$
+其中   
+
+- $\phi$: desired threshold of psychometric function。為吻合本實驗目的，設定成 $0.5$。
+
+- $c$ 為一常數(可以想像proportional to initial step size)，目前設定為$c = 320\times2$, i.e., first step is $320$.
+
+- $Z_n$: Indicator variable, based on response on 
+trial $n$, $Z_n = \begin{cases}1, &\text{if lottrry with tatget chosen;}\\ 0, & \text{otherwise.}\end{cases}$
+
+- $m_\text{shift}$: number of shifts (reversals) in response category.
+
+The step size is rounded to multiples of $5$.
+Similarly, the stopping rule is when step size $< 5$.  
+
+Similar to PEST, we implement 2 types of starting point: 
+
+  - midpoint starting point: 與 Bisection 相符，以中點為起始點
+
+  - random starting point(`randInit`): 在可能區間內以均等分配挑一點做為起始點
+
+### Mixture (PEST/ASA + UD)
+
+一開始使用PEST or ASA 此類 Adaptive methods, 但在滿足一定條件後轉而使用 fixed step size 之
+up-down method (以下稱 UD method, see @dixonMethod1948).
+
+The updating rule of up-down method is taking the form below (equation $(12)$ in @treutweinAdaptive1995): 
+$$
+X_{n+1} = X_n - \delta(2 Z_n -1).
+$$
+where $\delta$ is the constant step size.
+
+The process is stopped when the reversal times is exceed the proposed one. The final estimate can be obtained by averaging the reversal points (midrun-estimate, see @treutweinAdaptive1995), or simply the final point. For the current setting, we use midrun estimate.
+
+In current setting:
+
+-   up-down method is initiated when step size $\leq 4\times \delta=80$.
+
+-   Upon initiation, the step size $(\delta)$ is set as $20$
+-   Stopped when $4$ reversals happens.
+
+-   The midrun-estimate is computed.
+  -   Note: use last stimulus intensity as estimate can be implemented too.
+
+
+# Simulation Overview
+
+To investigate the potential drawback of Bisection method, methods mentioned above are paired with different values of $\phi$ corresponding to first error rate = $`r phi_vec`$.
+
+
+```{r simul_codes}
+# ----plotting params----
+dir_name <- "./ASA_simulation_RDS/"
+file_names <- c("extreme_phi.RDS") 
+fname <- paste0(dir_name, file_names)
+pic_path <- "./figs/"
+
+method_names <-
+  c("Bisection", "Bisection-Slider", "MOBS",
+    "PEST", 
+    paste0("PEST", "_randInit"),
+    paste0("PEST_UD", mix_param$stop_rev_times), # Mixture
+    paste0("PEST_UD", mix_param$stop_rev_times,"_randInit"),
+    "ASA",
+    paste0("ASA","_randInit"),
+    paste0("ASA_UD", mix_param$stop_rev_times,"_randInit"),
+    paste0("ASA_UD", mix_param$stop_rev_times)) # Mixture
+# ----Creating/Reading Files----
+set.seed(878)
+if (file.exists(fname)){
+  extreme_phi_list <- readRDS(fname)
+} else {
+  extreme_phi_list <- list()
+  for (phi_idx in 1:length(phi_vec)) {
+    phi <- phi_vec[phi_idx]
+    temp_list <- list()
+    cat(glue("=== phi={phi} === \n\n"))
+    for (i in 1:length(method_names)){
+      start_time <- Sys.time()
+      exp_param$random_init <- grepl("randInit", method_names[i])
+      if (grepl("UD", method_names[i])){
+        method <- str_split_1(method_names[i], "_")[1]
+        temp_list[[i]] <- make_log(
+          rep = Nsim,
+          params = param,
+          exp_params = exp_param,
+          phi = phi,
+          est_type = method,
+          mix_param = mix_param
+        ) 
+      } else{
+        method <- str_split_1(method_names[i], "_")[1]
+        temp_list[[i]] <- make_log(
+          rep = Nsim,
+          params = param,
+          exp_params = exp_param,
+          phi = phi,
+          est_type = method
+        ) 
+      }
+      time_taken <- Sys.time() - start_time
+      time_taken <- time_taken |>
+        as.numeric(unit = "secs")
+      cat(glue("{method_names[i]} Done. It takes {time_taken} seconds. \n\n"))
+    }
+    names(temp_list) <- method_names
+    names(temp_list)[2] <- "Bisection_Slider"
+    temp_list <- temp_list %>%
+      map(cleaning)
+    extreme_phi_list[[phi_idx]] <- temp_list
+  }
+  rm(i, method, start_time, time_taken)
+  names(extreme_phi_list) <- paste0("err_", c(.10, .05,.01, 0.01))
+  if (!file.exists(dir_name)) dir.create(dir_name)
+  saveRDS(extreme_phi_list, file = fname)
+}
+```
+
+# Results
+
+```{r eval=FALSE, include=FALSE}
+tmp.list <- rep(list(NULL), length(extreme_phi_list))
+for (i in length(extreme_phi_list)){
+  tmp <- extreme_phi_list[[i]]
+  tmp <- tmp %>% 
+    # map(~select(.x, ends_with("len"))) %>% 
+    bind_rows(.id = "method") %>% 
+    rename_with(~ str_remove(.x, "_len")) %>% 
+    pivot_longer(cols = -1,
+                 names_to = "estimates",
+                 values_to = "iteration_num")
+  tmp.list[[i]] <- tmp
+}
+tmp.list %>% 
+    bind_rows(.id = "method")
+```
+
+
+## Estimation {.tabset}
+
+Violin plots and boxplots are provided. In the boxplots, an extra blue errorbar represent the range 95% of the data.
+
+Under these extreme cases, most methods perform badly, only `ASA` has stable and consistent estimates. And not only `Bisection`/`Bisection` have extreme estimates, e.g., in some cases of `PEST`/`PEST_UD3`.
+
+For lambda violin plot, some extreme and irrational values ($\lambda>12$ or $\lambda<0$) are removed.
+
+
+`ASA_UD3` is biased. Even after the 
+
+
+
+```{r vio, fig.height=8, fig.width=10, results='asis'}
+for (i in 1:length(err)){
+  sublist <- extreme_phi_list[[i]]
+  cat(paste("\n\n###", "Error Rate = ", err[i], "\n\n"))
+  plt <- simu_violin(sublist) +
+    plot_annotation(glue("Error Rate in First Choice of L:{err[i]}"))
+  print(plt)
+  # Boxplot
+  plt <- simu_boxplot(sublist) +
+    plot_annotation(glue("Error Rate in First Choice of L:{err[i]}"))
+  print(plt)
+}
+rm(sublist, plt)
+```
+
+### Extreme values
+
+Shows the excluded extreme value ($\lambda>12$ or $<0$) counts.
+```{r paged.print=TRUE}
+for (i in 1:length(err)){
+  sublist <- extreme_phi_list[[i]]
+  total_df <- sublist %>% 
+    map(~select(.x, ends_with("est"), "lambda")) %>% 
+    bind_rows(.id = "method") %>% 
+    rename_with(~ str_remove(.x, "_est"),
+                ends_with("est"))
+  cat(paste("\n\n###", "Error Rate = ", err[i], "\n\n"))
+  N_extreme_lambda <- total_df %>% 
+    group_by(method) %>% 
+    filter(lambda>12 | lambda<0) %>% 
+    summarise(N = n()) %>% 
+    arrange(desc(N))
+  print(N_extreme_lambda)
+}
+```
+
+
+### Tables
+
+```{r make_tables}
+temp_list <- rep(list(NULL),length(err))
+names(temp_list) <- err
+for (i in 1:length(err)){
+  sublist <- extreme_phi_list[[i]]
+  temp_list[[i]] <- make_summ_table(sublist)
+}
+extreme_phi_summ_table <- bind_rows(temp_list, .id = "error")
+rm(temp_list)
+```
+
+```{r table1, }
+extreme_phi_summ_table %>%
+  filter(type=="est") %>% 
+  select(1:2, variable, med_bias, mean_bias, sd, lower95, upper95) %>%
+  arrange(desc(error), variable, sd) %>% 
+  # knitr::kable("html", caption = "Estimates b/t different methods") %>%
+  # kableExtra::kable_styling(
+    # bootstrap_options = "striped", full_width = F) %>%
+  # kableExtra::scroll_box() 
+  rmarkdown::paged_table()
+  # datatable(
+  #   options = list(pageLength = 11, 
+  #                  autoWidth = TRUE, 
+  #                  scrollX = TRUE),  # Horizontal scrolling if needed
+  #   caption = 'Iteration Times between different methods'
+  # )
+```
+Mixture Method only have better performance when $\phi$ is not so extreme.
+
+
+## Iteration Times {.tabset}
+
+The histogram below shows the iteration times distributions (exclude `ASA` and `ASA_randInit` because these 2 methods take too much iterations).
+Red line in the histogram represent median, blue line represent Q3.
+
+```{r iter, fig.height=7.2, fig.width=5.6, message=FALSE, results='asis'}
+for (i in 1:length(err)){
+  sublist <- extreme_phi_list[[i]]
+  cat(paste("\n\n###", "Error Rate = ", err[i], "\n\n"))
+  plt <- iter_plot(sublist, c("ASA","ASA_randInit")) +
+    ggtitle(glue("Iterations Taken (error_rate = {err[i]})"))
+  print(plt)
+}
+rm(plt)
+```
+
+### Tables
+
+```{r table2}
+extreme_phi_summ_table %>%
+  filter(type=="len") %>% 
+  select(1:2, variable:sd, Q3, upper95, max) %>%
+  arrange(desc(error), variable, median) %>% 
+  # knitr::kable("html", caption = "Estimates b/t different methods") %>%
+  # kableExtra::kable_styling(
+    # bootstrap_options = "striped", full_width = F) %>%
+  # kableExtra::scroll_box() 
+  rmarkdown::paged_table()
+  # datatable(
+  #   options = list(pageLength = 11, 
+  #                  autoWidth = TRUE, 
+  #                  scrollX = TRUE),  # Horizontal scrolling if needed
+  #   caption = 'Iteration Times between different methods'
+  # )
+```
+
+# Summary
+
+之前的模擬用的 $\phi$ 比這些extreme cases 都大，不同方法之間的優劣可能和 $\phi$ 有很大的關係
+
+
+```{r eval=FALSE, fig.height=9, fig.width=19, include=FALSE}
+converg.plot(lastnum = 5, result_list = sublist)
+```
+
+---
+# References
+
+
+
