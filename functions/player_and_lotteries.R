@@ -40,7 +40,7 @@ Player <- R6Class(
           print(lotteries$B)
           stop("prospect.B error!")
         }
-        ## TODO other than difference?
+
         prospect_dif <- prospect.B - prospect.A
         
         cho_A_prob <-
@@ -180,15 +180,22 @@ Lotteries <- R6Class(
                      (wp_50/wn_50))
         # print(result)
         result <- inv_utility(result, params)
-      } else if(est_quant %in% c(2,3)){
+      } else if (est_quant %in% c(2,3)){
         result <- wp_50 * utility(self$A[1], params, "CRRA") +
           wn_50 * utility(self$A[2], params, "CRRA")
-        # if (result>=0) {
-        #   result <- result^(1/.alpha)
-        # }else {
-        #   result <- -((1/lambda)*(-result))^(1/.alpha)
-        # }
         result <- inv_utility(result)
+      } else {
+        UA <- (wp_50 * utility(self$A[1], params, "CRRA")) +
+            (wn_50 * utility(self$A[2], params, "CRRA"))
+        if (est_quant == 4 || 
+            ((est_quant > 5) && (est_quant%%2==1))){
+          U_diff <- UA - (wp_50 * utility(self$B[1], params, "CRRA"))
+          prob_weight <- wn_50
+        } else{
+          U_diff <- UA - (wn_50 * utility(self$B[2], params, "CRRA"))
+          prob_weight <- wp_50
+        }
+        result <-  inv_utility(U_diff/prob_weight)
       }
       return(round(result))
     }
@@ -256,14 +263,14 @@ round_to_5 <- function(x, multiples= 5L){
 
 find_optimal_params <- function(
     params = list("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5),
-    exp_param = list("G"=2000L, "L_lc"= -300L, "G_lc" = 300L),
-    elicit_x2 = FALSE
+    exp_params_init = list("G"=2000L, "l"= -300L, "g" = 300L),
+    x_num = 3
 ){
   wp <- params$wp
   wn <- params$wn
-  G <- exp_param$G
-  l <- exp_param$L_lc
-  g <- exp_param$G_lc
+  G <- exp_params_init$G
+  loss_1 <- exp_params_init$l
+  gain_1 <- exp_params_init$g
   
   # L
   lott <- Lotteries$new(list(".A" = c(G,0), ".B"= c(0,0)))
@@ -275,34 +282,41 @@ find_optimal_params <- function(
   lott <- Lotteries$new(list(".A" = c(0, L), ".B"= c(0,0)))
   x1neg <- lott$find_optimal(params = params, 3) 
   lambda_KW <- -x1pos/x1neg
-  if (!elicit_x2){
+  if (x_num == 3){
     opt <- c(L, x1pos, x1neg, lambda_KW)
-    names(opt) <- c("L", "x1pos", "x1neg", "lambda")
-  } else {
-    # L_hw
-    L_hw <-( utility(l, params, type = "CRRA") - 
-      ((wp/wn) * utility(x1pos, params, type = "CRRA"))) |>
-      inv_utility(params = params)
+    names(opt) <- c("L", "x1pos", "x1neg", "lambda_KW")
+  } else if ((x_num %in% c(4,5))||((x_num %% 2) == 1)){
+    # L_2
+    lott <- Lotteries$new(list(".A" = c(0, loss_1), ".B"= c(x1pos,0)))
+    L_2 <- lott$find_optimal(params = params, 4)
+    # G2
+    lott <- Lotteries$new(list(".A" = c(gain_1, 0), ".B"= c(0,x1neg)))
+    G_2 <- lott$find_optimal(params = params, 5)
     # x2pos
-    x2pos <-
-      (utility(x1pos, params, type = "CRRA") +
-      ((wn/wp) * utility(l, params, type = "CRRA")) - 
-      ((wn/wp) * utility(L_hw, params, type = "CRRA"))) |>
-      inv_utility(params = params)
-    G_hw <- (utility(g, params, type = "CRRA") - 
-      ((wn/wp) * utility(x1neg, params, type = "CRRA"))) |>
-      inv_utility(params = params) #L_hw
-    x2neg <-
-      (utility(x1neg, params, type = "CRRA")+
-      ((wp/wn) * utility(g, params, type = "CRRA")) - 
-      ((wp/wn) * utility(G_hw, params, type = "CRRA"))) |>
-      inv_utility(params = params)
-    opt <- c(L, x1pos, x1neg,
-             L_hw, x2pos, G_hw, x2neg)
-    names(opt) <- c("L", "x1pos", "x1neg",
-                    "L_hw", "x2pos", "G_hw", "x2neg")
-  } 
+    opt <- c(L, x1pos, x1neg, L_2, G_2)
+    names(opt) <- c("L", "x1pos", "x1neg", "L_2", "G_2")
+    i_value <-  (x_num - 3L) %/% 2
+    if (i_value >= 2){
+      for (idx in 2:i_value){
+        last_xi_name <- paste0("x", idx-1, c("pos","neg"))
+        xi_name <- paste0("x", idx, c("pos","neg"))
+        last_x <-  opt[last_xi_name]
+        lott <- Lotteries$new(list(".A" = c(last_x[1], loss_1), ".B"= c(0,L_2)))
+        curr_xi_pos <- lott$find_optimal(params = params, ((2 * idx) - 1) + 5)
+        lott <- Lotteries$new(list(".A" = c(gain_1,last_x[2]), ".B"= c(G_2,0)))
+        curr_xi_neg <- lott$find_optimal(params = params, ((2 * idx) + 5))
+        opt <- c(opt, curr_xi_pos, curr_xi_neg)
+        names(opt)[c((length(opt)-1),length(opt))] <- xi_name
+      }
+    }
+    opt <- opt[1: x_num]
+    opt <- c(opt, "lambda_KW"=lambda_KW)
+  } else{
+    stop("Invalid 'x_num' value")
+  }
   return(opt)
-}
+  }
 
-opt <- find_optimal_params()
+
+
+# opt <- find_optimal_params()
