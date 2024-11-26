@@ -15,10 +15,12 @@ experiment = function(params,
                       ShowTaskLog = FALSE,
                       ...) {
   # Given player's attribute
+  n_est <- ifelse(!is.null(exp_params$n_est), exp_params$n_est, 3L)
   u_func <- match.arg(u_func)
   est_type <- match.arg(est_type)
-  n_est <- ifelse(!is.null(exp_params$n_est), exp_params$n_est, 3L)
-  stop_crit <- exp_params$stop_crit
+  min_step <- exp_params$min_step
+  # Early stop criterion
+  early_stop <- ifelse(is.null(exp_params$early_stop), 1000L, exp_params$early_stop)
   # Initialization
   player <- Player$new(params, phi, u_func)
   extra.arg <- list(...)
@@ -47,8 +49,8 @@ experiment = function(params,
     game$reset_step()
     # cat(paste("cur_task_idx:", cur_task_idx,
     #  "step:", game$show_step(est_type, cur_task_idx = cur_task_idx),"\n\n"))
-    while (game$show_step(est_type, cur_task_idx = cur_task_idx) >= stop_crit) {
-      # TODO: reversal criterion for MOBS
+    while (game$show_step(est_type, cur_task_idx = cur_task_idx) >= min_step) {
+      # while step size >= min_step
       trial <- trial + 1L
       cur_lotteries <-
         game$generate_lotteries(cur_task_idx, trial) # (->Lottery class object)
@@ -61,8 +63,13 @@ experiment = function(params,
         cur_task_idx = cur_task_idx,
         cur_trial = trial,
         random_init = exp_params$random_init,
-        phi = phi
+        phi = phi,
+        fix_bnd_width = exp_params$fix_bnd_width
       )
+      # early stop: if current iteration >= early stop
+      if (trial >= early_stop) {
+        break
+      }
     }
     # If slider, there's a final step
     if (est_type == "Bisection-Slider") {
@@ -99,7 +106,7 @@ experiment = function(params,
 
 # Generating-Preprocessing Simulation Data ----------------------------------------------
 
-make_log <- function(rep, params, exp_params, phi,
+make_log <- function(n.rep, params, exp_params, phi,
                      est_type =
                        c("Bisection", "Bisection-Slider", "PEST", "ASA", "MOBS"),
                      ...){
@@ -109,7 +116,7 @@ make_log <- function(rep, params, exp_params, phi,
   if (is.mixture){
     mix_param <- extra.arg$mix_param 
   }
-  for (i in 1:rep){
+  for (i in 1:n.rep){
     if (is.mixture){
       result <- experiment(
         params=params, exp_params = exp_params,
@@ -129,9 +136,9 @@ make_log <- function(rep, params, exp_params, phi,
       rename_with(~paste(.x, "est", sep="_"))
     
     # each entry is a vector
-    df.tmp <- map(result$log, list) %>% 
-      as.tibble() %>% 
-      mutate(Nsim = i, .before =1)
+    df.tmp <- map(result$log, list) %>%
+      as.tibble() %>%
+      mutate(Nsim = i, .before =1) %>%
       add_column(est.df)
     
     if(i==1) {df <- df.tmp}
@@ -149,10 +156,11 @@ cleaning <- function(df) {
     new_vec <- c(vec[-len], NA, NA)
     new_vec
   }
-  max_num <- str_extract(names(a), "x[1-9](pos|neg)") %>% 
-    str_extract("[1-9]") %>% 
-    as.numeric() %>% 
+  max_num <- str_extract(names(df), "x[1-9](pos|neg)") %>%
+    str_extract("[1-9]") %>%
+    as.numeric() %>%
     max(na.rm = T)
+  # find last name
   if (max_num > 2){
     last_x_name <- paste0("x",max_num,"neg")
   } else{
@@ -162,16 +170,36 @@ cleaning <- function(df) {
   df %>%
     mutate(
       across(L:!!sym(last_x_name),
-             \(x) map(x, get_step), # diff 
-             .names = "{.col}_step"
-      ),
+             \(x) map(x, get_step), # diff
+             .names = "{.col}_step"),
       across(L:!!sym(last_x_name),
              \(x) map_dbl(x, \(x) x[1]),
              .names = "{.col}_start"),
       across(L:!!sym(last_x_name),
              \(x) map_dbl(x, length),
              .names = "{.col}_len"),
-      lambda_KW = -x1pos_est / x1neg_est
+      lambda_KW = - (x1pos_est / x1neg_est)
+    )
+}
+
+cleaning2 <- function(df) {
+  max_num <- str_extract(names(df), "x[1-9](pos|neg)") %>%
+    str_extract("[1-9]") %>%
+    as.numeric() %>%
+    max(na.rm = T)
+  # find last name
+  if (max_num > 2){
+    last_x_name <- paste0("x",max_num,"neg")
+  } else{
+    .name <- names(df)[length(names(df))]
+    last_x_name <- str_remove(.name, "_est")
+  }
+  df %>%
+    mutate(
+      across(L:!!sym(last_x_name),
+             \(x) map_dbl(x, length),
+             .names = "{.col}_len"),
+      lambda_KW = - (x1pos_est / x1neg_est)
     )
 }
 

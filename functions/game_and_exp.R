@@ -3,7 +3,7 @@ library(R6)
 source(here::here("functions/player_and_lotteries.R"))
 
 # methods
-est_mehods <- c("Bisection", "Bisection-Slider", "MOBS", "PEST", "ASA")
+est_methods <- c("Bisection", "Bisection-Slider", "MOBS", "PEST", "ASA")
 # Game -------------------------------------------------------------------
 Game <- R6Class(
   "Game",
@@ -21,10 +21,12 @@ Game <- R6Class(
     est_type = "", 
     # Attributes of MOBS
     consis_check = FALSE,
+    regression_fill = list(up = 0L, low = 0L),
     # Attributes for PEST
-    last_choice = c(NA, NA, NA, NA), #last element is nearest choice
+    last_choice = c(NA, NA, NA, NA), # last element is nearest choice
     PEST_step = 320L,
     max_step = 1280L,
+    min_step = 5L,
     extra.step = FALSE,
     # Attribute for ASA
     m_shift = 0L,
@@ -92,6 +94,11 @@ Game <- R6Class(
     MOBS_update = function(choice, cur_task_idx, cur_trial) {
       low_stack <- private$bound_hist[[cur_task_idx]][["low"]]
       high_stack <- private$bound_hist[[cur_task_idx]][["up"]]
+      if (cur_trial == 1) {
+        # the bottom element when regression happens
+        private$regression_fill$low <- low_stack[1]
+        private$regression_fill$up <- high_stack[1]
+      }
       boundary <- c(low_stack[1], high_stack[1])
       change_option <- ifelse(cur_task_idx == 1,
                                 "A",
@@ -115,13 +122,13 @@ Game <- R6Class(
             (private$choice_history[[cur_task_idx]][idx[1]] != choice)
           )
         # If Not Consistent: regression
-        ## Update Stacks
+        ## Update Stacks: remove top element, fill bottom element
         if (notConsis && (choice == change_option)){
           private$bound_hist[[cur_task_idx]][["low"]] <- 
-            c(low_stack[-1], 0L)
+            c(low_stack[-1], private$regression_fill$low)
         } else if (notConsis && (choice != change_option)){
           private$bound_hist[[cur_task_idx]][["up"]] <- 
-            c(high_stack[-1], 0L)
+            c(high_stack[-1], private$regression_fill$up)
         }
         # else: not update stacks
         private$consis_check <- FALSE
@@ -343,7 +350,7 @@ Game <- R6Class(
   public = list(
     initialize =
       function(exp_params,
-               est_type = est_mehods,
+               est_type = est_methods,
                n_est = 3L,
                ...) {
         extra.arg <- list(...)
@@ -361,10 +368,11 @@ Game <- R6Class(
            )
         }
         
-        # check valid num. of estimates
-        if ((!is.numeric(n_est)) || (((n_est - 3L) %% 2) != 0)) {
+        # Check valid num. of estimates
+        if ((!is.numeric(n_est)) | (((n_est - 3L) %% 2) != 0)) {
           stop("Invalid 'n_est' value.")
         }
+        # Naming estimated points 
         private$n_est <- n_est
         estimated_pts <- c("L", "x1pos", "x1neg", "L2", "G2")
         .len <- length(private$estimated_pts)
@@ -380,6 +388,7 @@ Game <- R6Class(
         est_type <- match.arg(est_type)
         private$slider <- (est_type == "Bisection-Slider")
         private$est_type <- est_type
+        private$min_step <- exp_params$min_step # minimum_step
         private$init_values <- exp_params$init_values
         private$bound_hist <- 
           lapply(1:private$n_est, \(x) list(up = c(0L), low = c(0L)))
@@ -394,15 +403,6 @@ Game <- R6Class(
                          step_size)
       },
     
-    show_setting = function() {
-      # Output how many trials and tasks there are in this game
-      setting <- c(
-        "N_est" = private$n_est,
-        "Init" = private$init_values,
-        "est_Type" = private$est_type
-      )
-      return(setting)
-    },
     
     # Generate a new pair of lotteries.
     generate_lotteries = function(cur_task_idx, cur_trial) {  
@@ -470,22 +470,18 @@ Game <- R6Class(
         .B <- c(G2, self$show_task_log()[[cur_xi_name]][cur_trial])
       }
       lottery_values <- list(".A" = .A, ".B" = .B)
-      if (is.na(.A) || is.na(.B)){
+      if (anyNA(.A) | anyNA(.B)){
         print(c(cur_task_idx, cur_trial))
         print(lottery_values)
         stop("NA Lotteries Created in `generate_lotteries()`")
-      } else if ((diff(.A) > 0) || (diff(.B) > 0)) {
-        print(c(diff(.A), (diff(.B))))
-        print(c(cur_task_idx, cur_trial))
-        print(lottery_values)
-        stop("Lotteries order reversed in `generate_lotteries()`")
       }
       new_lotteries <- Lotteries$new(lottery_values)
       return(new_lotteries)
     },
 
     # Update Initial stim in chained task
-    prepare_chained_stim = function(cur_task_idx, random_init){
+    prepare_chained_stim = function(cur_task_idx, random_init,
+                                    fix_bnd_width = FALSE) {
       # Convert estimated point to next task idx
       EstToNextIdx <- \(x) (which(private$estimated_pts == x) + 1)
       if (private$n_est <= 5) {
@@ -497,7 +493,54 @@ Game <- R6Class(
         x_neg <- c(5, seq(7L, private$n_est, 2L)) + 1L
       }
 
-      if (cur_task_idx == EstToNextIdx("L")) { 
+      initialize_bounds <- function(est_type, lower_bnd, upper_bnd) {
+        if (private$est_type %in%  c("Bisection", "Bisection-Slider")) {
+          list(low = lower_bnd, up = upper_bnd)
+        } else if (est_type == "MOBS") {
+          list(low = rep(lower_bnd, 3), up = rep(upper_bnd, 3))
+        }
+      }
+
+      update_next_task <-
+        function(chained_val_name, left_pos, left_neg,
+                 right_stim, IsNextPos = FALSE,
+                 random_init = FALSE, fix_bnd_width = FALSE) {
+          if (fix_bnd_width){
+            if (IsNextPos) {
+              # if next update estimate positive, lower bound is left_pos
+              lower_bnd <- left_pos
+              upper_bnd <- lower_bnd + 5000L
+            } else {
+              upper_bnd <- left_neg
+              lower_bnd <- upper_bnd - 5000L
+            }
+            mid_point <- (lower_bnd + upper_bnd) %/% 2
+          } else {
+            # starting point s.t. expectation b/t are the same
+            mid_point <- left_pos + left_neg - right_stim
+            if (IsNextPos) {
+              # if next update estimate positive, lower bound is left_pos
+              lower_bnd <- left_pos
+              upper_bnd <- lower_bnd + (2 * (mid_point - lower_bnd))
+            } else {
+              upper_bnd <- left_neg
+              lower_bnd <- upper_bnd + (2 * (mid_point - upper_bnd))
+            }
+          }
+          if (private$est_type %in% c("Bisection", "Bisection-Slider", "MOBS")) {
+            bounds <- initialize_bounds(private$est_type, lower_bnd, upper_bnd)
+            private$bound_hist[[chained_val_name]][["low"]] <- bounds$low
+            private$bound_hist[[chained_val_name]][["up"]] <- bounds$up
+          }
+          # initialize starting point
+          private$task_log[[chained_val_name]][1] <-
+            ifelse((random_init && (lower_bnd < upper_bnd)),
+              runif(1, lower_bnd, upper_bnd) |> round_to_5(),
+              mid_point
+            )
+        }
+
+      if (cur_task_idx == EstToNextIdx("L")) {
         # end of L, initialize x1neg[1]
         cur_vec <- self$show_task_log()[["L"]]
         L <- cur_vec[length(cur_vec)]
@@ -513,52 +556,25 @@ Game <- R6Class(
           ifelse(((random_init) && (L<0)),
                  runif(1, L, 0) |> round_to_5(),
                  (L + 0) %/% 2)
+
       } else if (cur_task_idx == EstToNextIdx("x1pos")) {
         # end of x1pos, initialize L2[1]
         cur_vec <- self$show_task_log()[["x1pos"]]
         x1pos <- cur_vec[length(cur_vec)]
         # starting point s.t. expectation b/t are the same
         loss_1 <- private$init_values[["l"]]
-        mid_point <- loss_1 - x1pos
-        lower_bnd <- loss_1 + (2 * (mid_point - loss_1))
-        upper_bnd <- loss_1
-        #> Update for Bisection
-        if (private$est_type %in%  c("Bisection", "Bisection-Slider")) {
-          private$bound_hist[["L2"]][["low"]] <- lower_bnd
-          private$bound_hist[["L2"]][["up"]] <- upper_bnd
-        } else if (private$est_type == "MOBS") {
-          # low stack
-          private$bound_hist[["L2"]][["low"]] <- rep(lower_bnd, 3)
-          private$bound_hist[["L2"]][["up"]] <- rep(upper_bnd, 3)
-        }
-        # To avoid extreme cases that x1pos < 0
-        private$task_log[["L2"]][1] <-
-          ifelse(((random_init) && (lower_bnd < upper_bnd)),
-                 runif(1, lower_bnd, upper_bnd) |> round_to_5(),
-                 mid_point)
+        update_next_task("L2", 0, loss_1, x1pos, FALSE,
+                         random_init, fix_bnd_width)
+
       } else if (cur_task_idx == EstToNextIdx("x1neg")) {
         # end of x1-, initialize G2[1]
         cur_vec <- self$show_task_log()[["x1neg"]]
         x1neg <- cur_vec[length(cur_vec)]
         # starting point s.t. expectation b/t are the same
         gain_1 <- private$init_values[["g"]]
-        mid_point <- gain_1 - x1neg
-        lower_bnd <- gain_1
-        upper_bnd <- gain_1 + (2 * (mid_point - gain_1))
-        #> Update for Bisection
-        if (private$est_type %in%  c("Bisection", "Bisection-Slider")) {
-          private$bound_hist[["G2"]][["low"]] <- lower_bnd
-          private$bound_hist[["G2"]][["up"]] <- upper_bnd
-        } else if (private$est_type == "MOBS") {
-          # low stack
-          private$bound_hist[["G2"]][["low"]] <- rep(lower_bnd, 3)
-          private$bound_hist[["G2"]][["up"]] <- rep(upper_bnd, 3)
-        }
-        # To avoid extreme cases:
-        private$task_log[["G2"]][1] <-
-          ifelse(((random_init) && (lower_bnd < upper_bnd)),
-                 runif(1, lower_bnd, upper_bnd) |> round_to_5(),
-                 mid_point)
+        update_next_task("G2", gain_1, 0, x1neg, TRUE,
+                         random_init, fix_bnd_width)
+
       } else if (cur_task_idx %in% x_pos) {
         # end of x_{i}^{pos}, initialize x_{i+1}^{pos}[1]
         ## current (i) of x_i^{pos}:
@@ -572,25 +588,9 @@ Game <- R6Class(
         # L2
         L2_vec <- self$show_task_log()[["L2"]]
         L2 <- L2_vec[length(L2_vec)]
-        # starting point s.t. expectation b/t are the same
-        # x_i^+: (x_{i-1}^{pos}, loss_1) vs ("x_i^{pos}", L2)
-        mid_point <- cur_xi + loss_1 - L2
-        lower_bnd <- cur_xi
-        upper_bnd <- lower_bnd + (2 * (mid_point - lower_bnd))
-        #> Update for Bisection
-        if (private$est_type %in%  c("Bisection", "Bisection-Slider")) {
-          private$bound_hist[[next_xi_name]][["low"]] <- lower_bnd
-          private$bound_hist[[next_xi_name]][["up"]] <- upper_bnd
-        } else if (private$est_type == "MOBS") {
-          # low stack
-          private$bound_hist[[next_xi_name]][["low"]] <- rep(lower_bnd, 3)
-          private$bound_hist[[next_xi_name]][["up"]] <- rep(upper_bnd, 3)
-        }
-        # To avoid extreme cases:
-        private$task_log[[next_xi_name]][1] <-
-          ifelse(((random_init) && (lower_bnd < upper_bnd)),
-                 runif(1, lower_bnd, upper_bnd) |> round_to_5(),
-                 mid_point)
+        update_next_task(next_xi_name, cur_xi, loss_1, L2, TRUE,
+                         random_init, fix_bnd_width)
+
       } else if (cur_task_idx %in% x_neg) {
         # end of x_{i}^{neg}, initialize x_{i+1}^{neg}[1]
         ## current (i) of x_i^{neg}:
@@ -604,33 +604,19 @@ Game <- R6Class(
         # G2
         G2_vec <- self$show_task_log()[["G2"]]
         G2 <- G2_vec[length(G2_vec)]
-        # starting point s.t. expectation b/t are the same
-        # x_{i+1}^-: (gain_1, x_i^{neg}) vs (G2, "x_{i+1}^{neg}")
-        mid_point <- gain_1 + cur_xi - G2
-        upper_bnd <- cur_xi 
-        lower_bnd <- upper_bnd + (2 * (mid_point - upper_bnd))
-        #> Update for Bisection
-        if (private$est_type %in%  c("Bisection", "Bisection-Slider")) {
-          private$bound_hist[[next_xi_name]][["low"]] <- lower_bnd
-          private$bound_hist[[next_xi_name]][["up"]] <- upper_bnd
-        } else if (private$est_type == "MOBS") {
-          # low stack
-          private$bound_hist[[next_xi_name]][["low"]] <- rep(lower_bnd, 3)
-          private$bound_hist[[next_xi_name]][["up"]] <- rep(upper_bnd, 3)
-        }
-        # To avoid extreme cases:
-        private$task_log[[next_xi_name]][1] <-
-          ifelse(((random_init) && (lower_bnd < upper_bnd)),
-                 runif(1, lower_bnd, upper_bnd) |> round_to_5(),
-                 mid_point)
+        update_next_task(next_xi_name, gain_1, cur_xi, G2, FALSE,
+                         random_init, fix_bnd_width)
+
       }
     },
-
+    
+    # Update next stim to task log from player's choice
     update_task_log = function(choice, cur_task_idx, cur_trial,
                                random_init = FALSE, ...) {
-      #> The function takes the choice of players, compute next step,
-      #> and update the task log.
       extra.arg <- list(...)
+      fix_bnd_width <- ifelse(is.null(extra.arg$fix_bnd_width),
+                              FALSE,
+                              extra.arg$fix_bnd_width)
       if (!is.na(extra.arg$phi)) {
         phi <- extra.arg$phi
       }
@@ -659,23 +645,34 @@ Game <- R6Class(
                                    phi = phi)
       }
       cur_est_pt <- private$estimated_pts[cur_task_idx]
+      
 
-      # Wtite task Log
-      private$task_log[[cur_est_pt]] <-
-        c(private$task_log[[cur_est_pt]], value)
-      private$choice_history[[cur_task_idx]] <-
-        c(private$choice_history[[cur_task_idx]], choice)
-      # In start of a new task, update initial stim in next chained task
+      # Write task Log
+      .step <- self$show_step(
+        private$est_type,
+        cur_task_idx = cur_task_idx)
+      # TODO
+      if (.step >= private$min_step){
+        private$task_log[[cur_est_pt]] <-
+          c(private$task_log[[cur_est_pt]], value)
+        private$choice_history[[cur_task_idx]] <-
+          c(private$choice_history[[cur_task_idx]], choice)
+      } else {
+        # Final estimate is the last tested stimulus
+        # Not writing to task_log in this case
+        TRUE
+      }
+
+      # Begining of a new task, update initial stim in next chained task
       if ((cur_task_idx <= private$n_est - 1) & (cur_trial == 1)) {
         # -1 because no need update next one in final
         self$prepare_chained_stim(cur_task_idx = cur_task_idx,
-                                  random_init = random_init)
+                                  random_init = random_init,
+                                  fix_bnd_width = fix_bnd_width)
       }
+
       # For mixture, initialize the UD
       if (private$is.mix) {
-        .step <- self$show_step(
-          private$est_type,
-          cur_task_idx)
         # Condition of Starting UD
         private$UD_param$UD_start <-
           .step <= private$UD_param$delta*4 # <=80L
@@ -708,7 +705,7 @@ Game <- R6Class(
       }else if (est_type == "ASA") {
         return(private$ASA_step)
       }else if (est_type %in% c("Bisection", "Bisection-Slider")) {
-        if (is.na(extra_arg$cur_task_idx)) {
+        if (is.null(extra_arg$cur_task_idx)) {
           stop("w/o specifying `cur_task_idx` in Bisection/Slider!")
         }
         cur_task_idx <- extra_arg$cur_task_idx
@@ -725,9 +722,20 @@ Game <- R6Class(
         return(step)
       }
     },
+    
+    show_setting = function() {
+      # Output how many trials and tasks there are in this game
+      setting <- c(
+        "N_est" = private$n_est,
+        "Init" = private$init_values,
+        "est_Type" = private$est_type
+      )
+      return(setting)
+    },
 
     output_exp_result = function() {
       total_leng <- private$n_est
+      # num of xipos and xineg
       x_leng <- ifelse(private$n_est<=5,
                        2L,
                        private$n_est - 3L)
@@ -739,7 +747,19 @@ Game <- R6Class(
       names(result) <- all_pts_name
       for (idx in 1:total_leng){
         .name <- all_pts_name[idx]
-        result[idx] <- log[[.name]][length(log[[.name]])]
+        # result[idx] <- log[[.name]][length(log[[.name]])]
+        if (length(log[[.name]]) > 0) {
+          result[idx] <- log[[.name]][length(log[[.name]])]
+        } else {
+          cat(idx, .name, log[[.name]],"\n\n")
+          print(log)
+          print(private$choice_history)
+          print(private$bound_hist)
+          stop("`output_exp_result()`: NA in experiment log")
+          # result[idx] <- NA  # or another placeholder if needed
+          # cat("`output_exp_result()`: NA in experiment log","\n")
+        }
+        
       }
       return(result)
     },

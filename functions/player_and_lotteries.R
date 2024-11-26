@@ -94,8 +94,14 @@ Player <- R6Class(
           prospect_value <-
             (wp_50 * gain_prospect) +
             (wn_50 * loss_prospect)
+        }else { # loss, gain (very strange be still occur)
+          # Mixed
+          prospect_value <-
+            (wn_50 * gain_prospect) +
+            (wp_50 * loss_prospect)
         }
       }
+      
       return(prospect_value)
     }
   ),
