@@ -66,6 +66,26 @@ Player <- R6Class(
       type <- match.arg(type)
       # Compute mixed prospects so that the player can evaluate the lottery
       # lottery <-  c(gain, loss) ,which is lotteries$A or lotteries$B
+      if (any(is.na(lottery))) {
+        stop(glue("Error: lottery contains NA values. Lottery: {lottery}"))
+      } else if (any(is.null(lottery))) {
+        stop(glue("Error: lottery contains Null values. Lottery: {lottery}"))
+      }
+      tryCatch(
+        {
+          if (lottery[1] == lottery[2]) {
+            invisible()
+          }
+        },
+        error = function(e) {
+          cat("Error caught: ", e$message, "\n")
+          cat("DEBUG: lottery[1] =", lottery[1], "lottery =", lottery, "\n")
+          stop(e) # Re-throw the error after logging
+        }
+      )
+
+
+
       if (lottery[1] == lottery[2]) {
         # 100%
         prospect_value <- utility(lottery[1],

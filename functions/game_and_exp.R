@@ -1,9 +1,8 @@
+# source(here::here("functions/player_and_lotteries.R"))
+source("E:/Proj/Loss_Aversion_simu/functions/player_and_lotteries.R")
 # packages
 library(R6)
-source(here::here("functions/player_and_lotteries.R"))
 
-# methods
-est_methods <- c("Bisection", "Bisection-Slider", "MOBS", "PEST", "ASA")
 # Game -------------------------------------------------------------------
 Game <- R6Class(
   "Game",
@@ -18,7 +17,7 @@ Game <- R6Class(
     task_log = NA,  # list of vectors, should be initialized
     slider = FALSE, # using slider after `n_trial` bisections
     bound_hist = list(), # For bisection
-    est_type = "", 
+    est_type = "",
     # Attributes of MOBS
     consis_check = FALSE,
     regression_fill = list(up = 0L, low = 0L),
@@ -30,11 +29,11 @@ Game <- R6Class(
     extra.step = FALSE,
     # Attribute for ASA
     m_shift = 0L,
-    ASA_c = 4L*320L,
+    ASA_c = 2 * 320L,
     ASA_step = 320L,
     # Attribute for UD (up-down)
     is.mix = FALSE,
-    UD_param = list(),
+    late_phase_param = list(),
     step_size = 320L,
     choice_history = list(),
     
@@ -117,7 +116,7 @@ Game <- R6Class(
         # Check consistency with choice history
         notConsis <-
           ifelse(
-            length(idx)==1 , # not chosen before
+            length(idx) == 1 , # not chosen before
             FALSE,
             (private$choice_history[[cur_task_idx]][idx[1]] != choice)
           )
@@ -156,12 +155,15 @@ Game <- R6Class(
                  choice == private$last_choice
                  )
         # Prepare next stimulus
-        new_stim <- ifelse(!private$consis_check,
-                           (next_upper + next_lower) %/% 2,
-                           ifelse(choice == change_option,
-                                  next_lower,
-                                  next_upper)
-                           )
+        new_stim <- ifelse(
+          !private$consis_check,
+          (next_upper + next_lower) %/% 2, # Midpoint
+          ifelse(
+            choice == change_option,
+            next_lower,
+            next_upper
+          )
+        )
       }
       # update choice history
       private$last_choice <- choice
@@ -219,26 +221,31 @@ Game <- R6Class(
     },
 
     ## ASA
-    ASA_update = function(choice,
-                          last_stim, cur_task_idx, cur_trial){
+    ASA_update = function(
+      choice, last_stim, cur_task_idx, cur_trial
+    ) {
       ## Current response, see Treutwein, (1995)
       Zn <- ifelse(cur_task_idx == 1, # L
                    as.numeric(choice == "A"),
                    as.numeric(choice == "B"))
-      if (cur_trial == 1) {
+      late_phase_trial <- ifelse(
+        is.null(private$late_phase_param$late_phase_trial),
+        1L,
+        private$late_phase_param$late_phase_trial
+      )
+      if (cur_trial %in% c(1, late_phase_trial)) {
         private$m_shift <- 0L # times of reversal
-      } else{
-        # trials > 1
-        if (choice != private$last_choice){
-            private$m_shift <- private$m_shift + 1
-        }
+      } else if (choice != private$last_choice) {
+        private$m_shift <- private$m_shift + 1
       }
       private$last_choice <- c(choice)
-      
-      if (cur_trial %in% 1:2){
-        step <- (private$ASA_c / cur_trial) * (Zn - .5) 
+      # Update next stimulus
+      if (cur_trial %in% c(1, late_phase_trial)) {
+        step <- (private$ASA_c / 1) * (Zn - .5)
+      } else if (cur_trial %in% c(2, late_phase_trial + 1)) {
+        step <- (private$ASA_c / 2) * (Zn - .5)
       } else {
-        step <- private$ASA_c / (2 + private$m_shift) * (Zn - .5) 
+        step <- private$ASA_c / (2 + private$m_shift) * (Zn - .5)
       }
       step <- round(step) # not force multiples of 5
       private$ASA_step <- abs(step)
@@ -253,28 +260,28 @@ Game <- R6Class(
                    as.integer(choice == "A"),
                    as.integer(choice == "B"))
       last_choice <- private$last_choice
-      lc_len <- length(last_choice)
+      last_choice_idx <- length(last_choice)
+      # step size
       log <- private$task_log[[cur_task_idx]]
-      delta <-  private$UD_param$delta
-      step_size <- diff(
-        log[c(length(log), (length(log) - 1))]
-        ) |>
-        abs()
-      shift_count <- private$UD_param$UD_shift
-      stop_criterion <- private$UD_param$stop_rev_times
-      # Reversal: update reversal times and reversal hist
-      if (choice != last_choice[lc_len]) {
-        private$UD_param$UD_shift <-
-          private$UD_param$UD_shift + 1L
-        private$UD_param$shift_hist <-
-          c(private$UD_param$shift_hist, last_stim)
+      delta <- private$late_phase_param$start_step
+      latest_two_stimuli <- log[c(length(log), (length(log) - 1))]
+      step_size <- diff(latest_two_stimuli) |> abs()
+      # reversal count
+      rev_count <- private$late_phase_param$UD_reversal
+      stop_criterion <- private$late_phase_param$stop_rev_times
+      # Reversal: update reversal times and reversal history
+      if (choice != last_choice[last_choice_idx]) {
+        private$late_phase_param$UD_reversal <-
+          private$late_phase_param$UD_reversal + 1L
+        private$late_phase_param$reversal_history <-
+          c(private$late_phase_param$reversal_history, last_stim)
       }
-      #Update new stimuli
-      if (shift_count >= stop_criterion &&
+      # Update new stimuli
+      if (rev_count >= stop_criterion &&
             (step_size == delta)) {
         # Final estimate: midrun/last stimuli
-        if (private$UD_param$UseMidrunEst) {
-          new_stim <- mean(private$UD_param$shift_hist) |>
+        if (private$late_phase_param$UseMidrunEst) {
+          new_stim <- mean(private$late_phase_param$reversal_history) |>
             round()
         } else {
           new_stim <- last_stim
@@ -291,7 +298,7 @@ Game <- R6Class(
     
     ## Initialization:
     init_log = function(est_type, init_values, random_init,
-                        step_size, ...) {
+                        step_size, fixed_bnd_width = FALSE) {
       if (!is.list(init_values)) {
         stop("Input Error:'init_values' is not a list.")
       }
@@ -304,9 +311,13 @@ Game <- R6Class(
                         length(private$estimated_pts))
         names(bnd_list) <- private$estimated_pts
         #> Set bisection boundaries
-        private$bound_hist$L[["up"]] <-  0L
-        private$bound_hist$L[["low"]] <-  -2L * init_values[["G"]]
-        private$bound_hist$x1pos[["up"]] <-  init_values[["G"]]
+        private$bound_hist$L[["up"]] <- 0L
+        private$bound_hist$L[["low"]] <- ifelse(
+          fixed_bnd_width,
+          min(-5000L, -2L * init_values[["G"]]),
+          -2L * init_values[["G"]]
+        )
+        private$bound_hist$x1pos[["up"]] <- init_values[["G"]]
         private$bound_hist$x1pos[["low"]] <-  0L
         private$bound_hist$x1neg[["up"]] <-  0L
       } else if (est_type == "PEST") {
@@ -333,13 +344,15 @@ Game <- R6Class(
         rep(list(c()), length(private$estimated_pts))
       names(private$task_log) <- private$estimated_pts
       private$task_log[["L"]] <- 
+        -G +
         ifelse(!random_init,
-               -G,
-               runif(1, -2 * G, 0) |> round_to_5())
+               0,
+               rnorm(1, sd = 100) |> round_to_5())
       private$task_log[["x1pos"]] <- 
+        ((0 + (G)) / 2) +
         ifelse(!random_init,
-               (0 + (G)) / 2,
-               runif(1, 0, G) |> round_to_5())
+               0,
+               rnorm(1, sd = 100) |> round_to_5())
       
       private$choice_history <- 
         rep(list(c()), length(private$estimated_pts))
@@ -350,29 +363,44 @@ Game <- R6Class(
   public = list(
     initialize =
       function(exp_params,
-               est_type = est_methods,
+               est_type =
+               c("Bisection", "Bisection-Slider", "MOBS", "PEST", "ASA"),
                n_est = 3L,
                ...) {
         extra.arg <- list(...)
-        if (!is.null(extra.arg$mix_param)){
-           private$is.mix <- TRUE
-           private$UD_param <- list(
-             UD_start = FALSE,
-             UD_shift = 0L, # shift count
-             shift_hist = c(), # shifted-stimuli
-             delta = extra.arg$mix_param$UD_delta,
-             stop_rev_times = extra.arg$mix_param$stop_rev_times,
-             UseMidrunEst = ifelse(is.logical(extra.arg$mix_param$UseMidrunEst),
-                                   extra.arg$mix_param$UseMidrunEst,
-                                   TRUE)
-           )
+        # Mixture Setting
+        if (!is.null(extra.arg$late_phase_param)) {
+          private$is.mix <- TRUE
+          private$late_phase_param <- extra.arg$late_phase_param
+          .names <- names(private$late_phase_param)
+          # Check mix_param elements
+          stopifnot(c("est_method", "start_crit", "start_step") %in% .names)
+          if (private$late_phase_param$est_method == "UD") {
+            # UD Setup: Check mix_param elements
+            stopifnot(
+              "Error: missing elements in mix_param (UD)" =
+                c("stop_rev_times", "UseMidrunEst") %in% .names
+            )
+            private$late_phase_param["UD_reversal"] <- 0L # reversal count
+            private$late_phase_param["reversal_history"] <- c()
+          } else if (private$late_phase_param$est_method == "ASA") {
+            # ASA setup
+            private$ASA_c <- private$late_phase_param$start_step * 2L
+            private$ASA_step <- private$late_phase_param$start_step
+            private$last_choice <- NA
+            # Trial number when late phase start
+            private$late_phase_param["late_phase_trial"] <- -10L
+          } else {
+            stop("Error: Invalid 'est_method' value.")
+          }
+          private$late_phase_param["isLatePhase"] <- FALSE
         }
         
         # Check valid num. of estimates
         if ((!is.numeric(n_est)) | (((n_est - 3L) %% 2) != 0)) {
           stop("Invalid 'n_est' value.")
         }
-        # Naming estimated points 
+        # Naming estimated points
         private$n_est <- n_est
         estimated_pts <- c("L", "x1pos", "x1neg", "L2", "G2")
         .len <- length(private$estimated_pts)
@@ -390,7 +418,7 @@ Game <- R6Class(
         private$est_type <- est_type
         private$min_step <- exp_params$min_step # minimum_step
         private$init_values <- exp_params$init_values
-        private$bound_hist <- 
+        private$bound_hist <-
           lapply(1:private$n_est, \(x) list(up = c(0L), low = c(0L)))
         # Initialize task_log
         random_init <- ifelse(is.logical(exp_params$random_init),
@@ -400,12 +428,11 @@ Game <- R6Class(
                             exp_params$step_size,
                             320L)
         private$init_log(est_type, exp_params$init_values, random_init,
-                         step_size)
+                         step_size, exp_params$fix_bnd_width)
       },
     
-    
     # Generate a new pair of lotteries.
-    generate_lotteries = function(cur_task_idx, cur_trial) {  
+    generate_lotteries = function(cur_task_idx, cur_trial) {
       G <- private$init_values[["G"]]
       loss_1 <- private$init_values[["l"]]
       gain_1 <- private$init_values[["g"]]
@@ -470,9 +497,10 @@ Game <- R6Class(
         .B <- c(G2, self$show_task_log()[[cur_xi_name]][cur_trial])
       }
       lottery_values <- list(".A" = .A, ".B" = .B)
-      if (anyNA(.A) | anyNA(.B)){
+      if (anyNA(.A) | anyNA(.B)) {
         print(c(cur_task_idx, cur_trial))
         print(lottery_values)
+        print(self$show_task_log()[[cur_task_idx]])
         stop("NA Lotteries Created in `generate_lotteries()`")
       }
       new_lotteries <- Lotteries$new(lottery_values)
@@ -531,12 +559,16 @@ Game <- R6Class(
             bounds <- initialize_bounds(private$est_type, lower_bnd, upper_bnd)
             private$bound_hist[[chained_val_name]][["low"]] <- bounds$low
             private$bound_hist[[chained_val_name]][["up"]] <- bounds$up
+          } else {
+            invisible()
           }
           # initialize starting point
           private$task_log[[chained_val_name]][1] <-
-            ifelse((random_init && (lower_bnd < upper_bnd)),
-              runif(1, lower_bnd, upper_bnd) |> round_to_5(),
-              mid_point
+            mid_point + 
+            ifelse(
+              (random_init && (lower_bnd < upper_bnd)),
+              rnorm(1, sd = 100) |> round_to_5(),
+              0
             )
         }
 
@@ -545,7 +577,7 @@ Game <- R6Class(
         cur_vec <- self$show_task_log()[["L"]]
         L <- cur_vec[length(cur_vec)]
         #> Update for Bisection
-        if (private$est_type %in%  c("Bisection", "Bisection-Slider")) {
+        if (private$est_type %in% c("Bisection", "Bisection-Slider")) {
           private$bound_hist[["x1neg"]][["low"]] <- L
         } else if (private$est_type == "MOBS") {
           # low stack
@@ -553,9 +585,12 @@ Game <- R6Class(
         }
         # To avoid extreme cases that L>0
         private$task_log[["x1neg"]][1] <-
-          ifelse(((random_init) && (L<0)),
-                 runif(1, L, 0) |> round_to_5(),
-                 (L + 0) %/% 2)
+          ((L + 0) %/% 2)
+          ifelse(
+            ((random_init) && (L<0)),
+            rnorm(1, sd = 100) |> round_to_5(),
+            0
+            )
 
       } else if (cur_task_idx == EstToNextIdx("x1pos")) {
         # end of x1pos, initialize L2[1]
@@ -621,49 +656,71 @@ Game <- R6Class(
         phi <- extra.arg$phi
       }
       last <- private$task_log[[cur_task_idx]][cur_trial]
-      UD_start <- private$UD_param$UD_start
-      if (!is.null(UD_start) && UD_start) {
-        value <- private$UD_update(choice, last_stim = last,
-                                   cur_task_idx, cur_trial)
-      } else if (private$est_type == "PEST") {
-        value <- private$PEST_update(choice, last_stim = last,
-                                   cur_task_idx, cur_trial)
-      } else if (private$est_type == "ASA") {
-        value <- private$ASA_update(choice, last_stim = last,
-                                     cur_task_idx, cur_trial)
-
-      } else if (private$est_type == "MOBS") {
-        value <-
-          private$MOBS_update(choice, 
-                              cur_task_idx = cur_task_idx,
-                              cur_trial = cur_trial)
-      } else if (private$est_type %in% c("Bisection", "Bisection-Slider")) {
-        value <-
-          private$bisection_update(choice,
-                                   cur_task_idx = cur_task_idx,
-                                   cur_trial = cur_trial,
-                                   phi = phi)
+      isLatePhase <- private$late_phase_param$isLatePhase
+      isLatePhase <- ifelse(
+        is.null(isLatePhase),
+        FALSE,
+        isLatePhase
+      )
+      est_type <- ifelse(
+        isLatePhase,
+        private$late_phase_param$est_method,
+        private$est_type
+      )
+      if (est_type == "PEST") {
+        value <- private$PEST_update(
+          choice,
+          last_stim = last,
+          cur_task_idx,
+          cur_trial
+        )
+      } else if (est_type == "ASA") {
+        value <- private$ASA_update(
+          choice,
+          last_stim = last,
+          cur_task_idx,
+          cur_trial
+        )
+      } else if (est_type == "MOBS") {
+        value <- private$MOBS_update(
+          choice,
+          cur_task_idx = cur_task_idx,
+          cur_trial = cur_trial
+        )
+      } else if (est_type %in% c("Bisection", "Bisection-Slider")) {
+        value <- private$bisection_update(
+          choice,
+          cur_task_idx = cur_task_idx,
+          cur_trial = cur_trial,
+          phi = phi
+        )
+      } else if (est_type == "UD") {
+        value <- private$UD_update(
+          choice,
+          last_stim = last,
+          cur_task_idx,
+          cur_trial
+        )
       }
       cur_est_pt <- private$estimated_pts[cur_task_idx]
-      
 
       # Write task Log
-      .step <- self$show_step(
-        private$est_type,
-        cur_task_idx = cur_task_idx)
-      # TODO
-      if (.step >= private$min_step){
+      step <- self$show_step(est_type, cur_task_idx = cur_task_idx)
+
+      if (step >= private$min_step) {
+        # Writing task_log
         private$task_log[[cur_est_pt]] <-
           c(private$task_log[[cur_est_pt]], value)
+        # Writing choice_history
         private$choice_history[[cur_task_idx]] <-
           c(private$choice_history[[cur_task_idx]], choice)
       } else {
         # Final estimate is the last tested stimulus
         # Not writing to task_log in this case
-        TRUE
+        invisible()
       }
 
-      # Begining of a new task, update initial stim in next chained task
+      # Beginning of a new task, update initial stim in next chained task
       if ((cur_task_idx <= private$n_est - 1) & (cur_trial == 1)) {
         # -1 because no need update next one in final
         self$prepare_chained_stim(cur_task_idx = cur_task_idx,
@@ -671,40 +728,51 @@ Game <- R6Class(
                                   fix_bnd_width = fix_bnd_width)
       }
 
-      # For mixture, initialize the UD
+      # Update late phase status:
+      # if step <= start criterion, start late phase in next trial
       if (private$is.mix) {
-        # Condition of Starting UD
-        private$UD_param$UD_start <-
-          .step <= private$UD_param$delta*4 # <=80L
+        late_phase_flag <- step <= private$late_phase_param$start_crit
+        if (isLatePhase != late_phase_flag) {
+          # isLatePhase from FALSE to TRUE
+          private$late_phase_param$late_phase_trial <- (cur_trial + 1)
+        }
+        private$late_phase_param$isLatePhase <- late_phase_flag
       }
     },
 
     reset_step = function() {
       private$PEST_step <- private$step_size
-      private$ASA_c <- private$step_size *2L
+      private$ASA_c <- private$step_size * 2L
       private$ASA_step <- private$step_size
       private$m_shift <- 0L
       private$consis_check == FALSE
-      if (private$is.mix){
-        private$UD_param$UD_start  <- FALSE
-        private$UD_param$UD_shift  <- 0L
-        private$UD_param$shift_hist  <- c()
+
+      # Reset Mixture States
+      late_method <- private$late_phase_param$est_method
+      if (private$is.mix) {
+        private$late_phase_param$isLatePhase <- FALSE
+        if (late_method == "UD") {
+          private$late_phase_param$UD_reversal  <- 0L
+          private$late_phase_param$reversal_history  <- c()
+        } else if (late_method == "ASA") {
+          private$ASA_c <- private$late_phase_param$start_step * 2L
+          private$ASA_step <- private$late_phase_param$start_step
+          private$last_choice <- NA
+          private$late_phase_param$late_phase_trial <- -10L
+        }
       }
     },
 
     show_step = function(est_type,
-                         ...){
+                         ...) {
       extra_arg <- list(...)
-      if (private$is.mix &&
-          private$UD_param$UD_shift >= private$UD_param$stop_rev_times
-          ){
-        return(0L) # stop
-      }
+
+      is_mixture <- private$is.mix
       if (est_type == "PEST") {
         private$PEST_step
-      }else if (est_type == "ASA") {
+      } else if (est_type == "ASA") {
         return(private$ASA_step)
-      }else if (est_type %in% c("Bisection", "Bisection-Slider")) {
+      } else if (est_type %in% c("Bisection", "Bisection-Slider")) {
         if (is.null(extra_arg$cur_task_idx)) {
           stop("w/o specifying `cur_task_idx` in Bisection/Slider!")
         }
@@ -714,23 +782,31 @@ Game <- R6Class(
         leng <- length(lower)
         step <- (upper[leng] - lower[leng]) %/% 2
         return(step)
-      }else if (est_type == "MOBS") {
+      } else if (est_type == "MOBS") {
         cur_task_idx <- extra_arg$cur_task_idx
         lower <- private$bound_hist[[cur_task_idx]][["low"]]
         upper <- private$bound_hist[[cur_task_idx]][["up"]]
         step <- (upper[1] - lower[1]) %/% 2
         return(step)
+      } else if (est_type == "UD") {
+        UD_reversal <- private$late_phase_param$UD_reversal
+        stop_rev_times <- private$late_phase_param$stop_rev_times
+        # step == 0 if reversal times til limits
+        reversal_limit_reached <- UD_reversal >= stop_rev_times
+        step <- ifelse(
+          reversal_limit_reached,
+          0L,
+          private$late_phase_param$start_step
+        )
       }
     },
-    
-    show_setting = function() {
-      # Output how many trials and tasks there are in this game
-      setting <- c(
-        "N_est" = private$n_est,
-        "Init" = private$init_values,
-        "est_Type" = private$est_type
-      )
-      return(setting)
+
+    get_late_phase_status = function() {
+      if (is.null(private$late_phase_param)) {
+        return(FALSE)
+      } else {
+        return(private$late_phase_param$isLatePhase)
+      }
     },
 
     output_exp_result = function() {
@@ -747,24 +823,19 @@ Game <- R6Class(
       names(result) <- all_pts_name
       for (idx in 1:total_leng){
         .name <- all_pts_name[idx]
-        # result[idx] <- log[[.name]][length(log[[.name]])]
         if (length(log[[.name]]) > 0) {
           result[idx] <- log[[.name]][length(log[[.name]])]
         } else {
-          cat(idx, .name, log[[.name]],"\n\n")
           print(log)
           print(private$choice_history)
           print(private$bound_hist)
-          stop("`output_exp_result()`: NA in experiment log")
-          # result[idx] <- NA  # or another placeholder if needed
-          # cat("`output_exp_result()`: NA in experiment log","\n")
+          stop("`output_exp_result()`: NA/NULL in experiment log")
         }
-        
       }
       return(result)
     },
     show_bound = function() private$bound_hist,
-    show_midrun_stim = function() private$UD_param$shift_hist,
+    show_midrun_stim = function() private$late_phase_param$reversal_history,
     show_task_log = function() private$task_log,
     show_choice_history = function() private$choice_history
   )
