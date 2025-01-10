@@ -23,11 +23,11 @@ experiment <- function(
   est_type <- match.arg(est_type)
   min_step <- exp_params$min_step
   # Early stop criterion
-  early_stop <- ifelse(
-    (is.null(exp_params$early_stop) | is.na(exp_params$early_stop)),
-    1000L,
-    exp_params$early_stop
-  )
+  if (is.null(exp_params$early_stop) || is.na(exp_params$early_stop)) {
+    early_stop <- 1000L
+  } else {
+    early_stop <- exp_params$early_stop
+  }
   # Initialization
   player <- Player$new(params, phi, u_func)
   extra.arg <- list(...)

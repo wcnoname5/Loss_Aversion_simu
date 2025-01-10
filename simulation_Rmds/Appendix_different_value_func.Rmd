@@ -1,0 +1,611 @@
+---
+title: "Varying Value Function"
+author: "Wei-Chen Chang"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+     toc: true
+     toc_depth: 2
+     toc_float: true
+     code-link: true
+     code-tools: true
+     code_folding: show
+     code_download: true
+     code-overflow: "scroll"
+     self-contained: true
+     number_sections: false
+     df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	fig.align = "center",
+	warning = FALSE,
+	rows.print=11,
+	paged.print=TRUE
+)
+```
+
+
+```{r lib, message=FALSE, include=FALSE}
+library(tidyverse)
+library(DT)
+library(glue)
+library(magrittr)
+library(patchwork)
+library(kableExtra)
+# import functions
+source("E:/Proj/Loss_Aversion_simu/functions/player_and_lotteries.R")
+
+# ggplot settings
+theme_set({
+  theme_bw()+    
+  theme(axis.title = element_text(size = 16),
+        # axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text = element_text(size = 13),
+        strip.text= element_text(size = 12),
+        legend.title = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        title = element_text(size = 18))
+})
+
+# directories
+dir_name <- "./ASA_simulation_RDS"
+pic_path <- "./figs"
+```
+
+# Settings
+
+```{r params, include=FALSE}
+Nsim <-  1000L
+phi <-  0.0367 # err = 1e-8, 0.027513126 is err = 1e-6
+param <-  list("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5)
+exp_param <- list(
+  init_values =
+    list("G" = 2000L, "g" = 300L, "l" = -300L),
+  random_init = FALSE,
+  fix_bnd_width = FALSE,
+  n_est = 3L + (6*2L),
+  min_step = 0L,
+  step_size = 320L
+)
+# plot labels
+latex_labels <- c(
+  expression(x[6]^"-"), expression(x[5]^"-"), expression(x[4]^"-"),
+  expression(x[3]^"-"), expression(x[2]^"-"), expression(x[1]^"-"),
+  expression(x[1]^"+"), expression(x[2]^"+"), expression(x[3]^"+"),
+  expression(x[4]^"+"), expression(x[5]^"+"), expression(x[6]^"+")
+)
+```
+
+
+# Intro
+
+改變 Agent 服從的 value function， 不同方法下是否會有不同結果?
+
+  -   把 power function 中 $\lambda$ 變成 3 種 levels: 0.5, 1, 2.25.
+
+
+
+## pre-process
+
+```{r preproc_func}
+utility_longer <- function(df){
+  
+  util.levels <- c(paste0("x", 6:1, "neg"),
+                        "x0",
+                        paste0("x", 1:6, "pos"))
+  # pivot_longer to x and utility levels
+  new_df <- df %>% 
+    pivot_longer(cols = starts_with("x"), 
+                 names_to = "utility", 
+                 values_to = "x_value") %>% 
+    mutate(utility =
+             factor(utility,
+                    labels = -6:6,
+                    levels = util.levels
+                    )
+           )
+  new_df
+}
+
+
+util.levels <- c(paste0("x", 6:1, "neg"),
+                      "x0",
+                      paste0("x", 1:6, "pos"))
+```
+
+```{r read_file}
+test_df <- 
+  readRDS(
+    "E:/Proj/Loss_Aversion_simu/simulation_Rmds/ASA_simulation_RDS/boundary_lambda_vary.RDS"
+    ) %>% 
+  rename(method = method_type) %>% 
+  select(phi, method, alpha:lambda, Nsim, any_of("early_stop"),
+         matches("^x[1-9](pos|neg)_est")) %>% 
+  rename_with(\(x) str_remove(x, "_est")) %>% 
+  add_column(x0 = 0L, .before = "x1pos")
+
+# Add true value
+test_df <- test_df %>%
+  # filter(phi == "medium") %>% # vary lambda, fix phi level
+  nest(data = !c(alpha:lambda)) %>%
+  rowwise() %>%
+  mutate(
+    truev = list(
+      find_optimal_params(
+        params = list(
+          "alpha" = alpha, "beta" = beta, "lambda" = lambda, "wp" = 0.5, "wn" = 0.5
+          ),
+        exp_params_init = exp_param$init_values,
+        x_num = exp_param$n_est)
+      )
+    ) %>%
+  ungroup() %>%
+  unnest_wider(truev, names_sep = "_") %>%
+  select(!matches("truev_(L(_2)?|G_2|lambda_KW)$")) # L, L2 G2 orlambdaKW
+
+# unnest and pivot_longer
+true_df <- test_df %>%
+  add_column(truev_x0 = 0) %>% 
+  pivot_longer(
+    cols = starts_with("truev"), 
+    names_to = "utility",
+    values_to = "true_value") %>% 
+  mutate(utility = utility |>
+           str_remove("^truev_")|>
+           factor(labels = -6:6, levels = util.levels)
+         ) %>% 
+  select(!data)
+
+cleaned_df <- test_df %>%
+  select(alpha: data) %>% 
+  unnest(data) %>%
+  utility_longer() %>% 
+  left_join(true_df, by = join_by(alpha, beta, lambda, utility))
+  
+```
+
+```{r eval=FALSE, fig.height=20, fig.width=8, include=FALSE}
+cleaned_df %>% 
+  group_by(phi) %>% 
+  filter(phi != "small") %>%
+  ggplot(aes(y = utility)) +
+  geom_hline(
+    yintercept = 
+      as.numeric(
+        factor("x0",
+               levels =
+                 c(paste0("x", 6:1, "neg"),
+                   "x0",
+                   paste0("x", 1:6, "pos")))),
+    color = "red2",
+    linetype = "dashed", alpha = 0.8) +
+  # True utility curve
+  geom_line(
+    aes(y = utility, x = true_value, group = 1),
+    color = "black", linetype = "3331") +
+  geom_point(
+    aes(y = utility, x = true_value, group = 1),
+    color = "black", pch = 1, size =2.5) +
+  stat_summary(
+    aes(y = utility, x = x_value, color = phi, shape = phi),
+    geom = "pointrange",
+    fun = \(x) mean(x, na.rm = TRUE),
+    fun.min = \(x) quantile(x, .025, na.rm = TRUE),
+    fun.max = \(x) quantile(x, .975, na.rm = TRUE),
+    position = position_dodge(width = 0.9),
+    linewidth = 1.1, size = 0.6, alpha=.8
+  ) +
+  labs(x = "Elicited x ", y = "Values", color = "phi") +
+  facet_grid(method ~ lambda, scales = "free_x") +
+  theme(
+    legend.position = "bottom",
+    axis.title = element_text(size = 16),
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text = element_text(size = 13),
+    strip.text= element_text(size = 13),
+    legend.text = element_text(size = 15)) +
+  ggtitle(glue("Value Curve"))
+```
+
+
+
+
+## Bias and RMSE
+
+```{r fig.height=8, fig.width=20}
+df.bias_RMSE <- cleaned_df %>%
+  filter(utility != 0) %>% 
+  group_by(phi, method, utility, lambda) %>% 
+  summarise(
+   bias = mean(x_value - true_value)|> round(),
+   RMSE = (x_value - true_value)^2 |> 
+     mean() |>
+     sqrt() |>
+     round(),
+   .groups = "drop"
+   )
+```
+
+## Bias
+
+```{r bias, fig.height=8, fig.width=20}
+df.bias_RMSE %>% 
+  mutate(lambda = as.factor(lambda)) %>%
+  ggplot(aes(x = utility)) +
+  geom_line(aes(
+    x = utility,
+    y = bias,
+    color = lambda,
+    group=lambda),
+    linewidth = 1.2,
+    alpha = 0.8
+    ) +
+  geom_hline(yintercept = 0, color = "grey30", lty=2, alpha=0.8)+
+  geom_point(
+    aes(
+      y = bias,
+      color = lambda),
+    size = 3) +
+  facet_grid(rows = vars(phi),
+             cols = vars(method),
+             scales = "free_y"
+             ) +
+  scale_x_discrete(labels = latex_labels) +
+  labs(x = "x_i",
+       y = "Bias",
+       title = "Bias (Varies with Lambda)")+
+  theme(
+    title = element_text(size = 20),
+    legend.position = "bottom",
+    legend.title = element_text(size = 18),
+    legend.text = element_text(size = 14),
+    axis.title = element_text(size = 16),
+    axis.text.x = element_text(size = 12, vjust = 0.5, hjust = 0.5),
+    axis.text = element_text(size = 13),
+    strip.text= element_text(size = 12)
+    )
+
+pname <- "study1_bias_different_Lambda.pdf"
+
+if (!file.exists(file.path(pic_path, pname))) {
+  ggsave(filename = pname,
+         width = 21,
+         height = 7,
+         units = "in",
+         device = "pdf",
+         path = pic_path)
+} else {
+  cat("File already exists. Not saving:", file.path(pic_path, pname), "\n")
+}
+```
+
+- 當 $\phi$ 小的時候，equal expectation 表現比 fix_bound 還好，有可能問題不是boundary 沒包到真值。這部分要思考如何解釋
+
+- $\lambda = 0.5$ 下的biasedness 問題可能來自 starting point 離真值太遠，所以不管是不是bisection-based method，都有類似的pattern (因為起始點決定方法一樣).
+
+- 再討論(or 畫看看整個選擇的trace)
+
+
+## RMSE
+
+```{r RMSE, fig.height=8, fig.width=20}
+df.bias_RMSE %>% 
+  mutate(lambda = as.factor(lambda)) %>%
+  ggplot(aes(x = utility)) +
+  geom_line(aes(
+    x = utility,
+    y = RMSE,
+    color = lambda,
+    group=lambda),
+    linewidth = 1.2,
+    alpha = 0.8
+    ) +
+  # geom_hline(yintercept = 0, color = "grey30", lty=2, alpha=0.8)+
+  geom_point(
+    aes(
+      y = RMSE,
+      color = lambda),
+    size = 3) +
+  facet_grid(rows = vars(phi),
+             cols = vars(method),
+             scales = "free_y"
+             ) +
+  theme(
+    legend.position = "bottom",
+    axis.title = element_text(size = 16),
+    # axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text = element_text(size = 12),
+    strip.text= element_text(size = 13),
+    legend.text = element_text(size = 15)) +
+  ggtitle(glue("RMSE"))
+
+```
+
+
+
+# Loss Aversion
+
+
+## Preprocess
+
+```{r functions}
+# functions for computing Loss Aversion esimates
+KT_reg_fast <- function(data, output) {
+  x <- abs(data$loss)
+  y <- data$gain
+  if (anyNA(x)) stop("x problem")
+  else if (anyNA(y)) stop("y problem")
+  else if (any(x %in% c(-Inf, Inf))) stop("x inf")
+  else if (any(y %in% c(-Inf, Inf))) stop("y inf")
+  coef <- sum(x * y) / sum(x^2)  # Slope estimate for gain ~ 0 + abs(loss)
+  
+  if (output == "coefficient") {
+    coef
+  }
+}
+
+get_minusx_utility <- function(x, data, method = c("interpolation", "power_func"), 
+                               alpha = NULL, beta = NULL){
+  method <- match.arg(method)
+  
+  minusx <- - x
+  if (method == "interpolation") {
+    interpolate_point <- approx(x = sort(c(data$loss, 0, data$gain)), y = -6:6, xout = minusx)
+    minusx_utility <- interpolate_point$y
+  } else { # method == "power_func"
+    minusx_utility <- NA
+  }
+  
+  return(minusx_utility)
+}
+
+KT <- function(data, output = c("coefficient", "classification", "all"),
+               type = c("median", "mean")){
+  output <- match.arg(output)
+  type <- match.arg(type)
+  
+  gain_max <- max(data$gain)
+  loss_min <- min(data$loss)
+  
+  lambda <- data %>% 
+    pivot_longer(cols = c(gain, loss), names_to = "domain", values_to = 'x') %>% 
+    mutate(utility = (-1)^(domain == "loss") * trial,
+           minusx_utility = map_dbl(x, ~ get_minusx_utility(., data)),
+           utility_ratio = pmap_dbl(list(domain, utility, minusx_utility), 
+                                    ~ switch(..1, 
+                                             gain = abs(..3 / ..2),
+                                             loss = abs(..2 / ..3)))) %>% 
+    summarise(estimate = switch(type, 
+                                median = median(utility_ratio, na.rm = TRUE),
+                                mean = mean(utility_ratio, na.rm = TRUE)),
+              n_reasonable_points = sum(!is.na(utility_ratio)),
+              criterion = ceiling(n_reasonable_points / 2),
+              n_ratio_greater_1 = sum(utility_ratio > 1, na.rm = TRUE),
+              n_ratio_less_1 = sum(utility_ratio < 1, na.rm = TRUE)) %>% 
+    mutate(classification = case_when(n_ratio_greater_1 > criterion  ~ "averse",
+                                      n_ratio_less_1 > criterion ~ "seeking",
+                                      TRUE ~ "neutral"))
+  
+  if (output == "coefficient") {
+    lambda$estimate
+  } else if (output == "classification") {
+    lambda$classification
+  } else {
+    lambda
+  }
+}
+```
+
+
+```{r true_LA}
+# compute True LA coef. values
+trueLA_df <- test_df %>% 
+  select(!data) %>% 
+  mutate(KW = - truev_x1pos / truev_x1neg) %>% 
+  pivot_longer(cols = matches(".*[1-9][pos|neg]"),
+                 names_to = c("trial", "type"),
+                 names_pattern = "x(\\d)(.*)",
+                 values_to = "value") %>%
+  mutate(
+    trial = as.integer(trial),
+    type = ifelse(type == "pos", "gain", "loss")  # Assign gain/loss
+  ) %>% 
+  pivot_wider(names_from = type, values_from = value) %>%
+  nest(data = c(trial, gain, loss))
+
+trueLA_df <- trueLA_df %>% 
+  mutate(
+      KT_mean = map_dbl(data, ~ KT(.x, output = "coefficient", type = "mean")),
+      KT_median = map_dbl(data, ~ KT(.x, output = "coefficient", type = "median")),
+      KT_reg = map_dbl(data, ~ KT_reg_fast(., output = "coefficient")),
+      .keep = "unused"
+    ) %>% 
+  pivot_longer(cols = KW:KT_reg,
+               names_to = "LA_type",
+               values_to = "true_LA_est")
+
+```
+
+
+```{r compute LA}
+file_path <- file.path(dir_name, "LA_reslut_fixbnd_varylambda_df.RDS")
+
+if (file.exists(file_path)) {
+  LA_result <- read_rds(file_path)
+  print(paste("File read from:", file_path))
+} else {
+  library(furrr)
+  LA_result <- test_df %>% 
+    select(!starts_with("true")) %>% 
+    unnest() %>% 
+    mutate(KW = -x1pos/x1neg)
+  
+  LA_result <- LA_result %>% 
+    pivot_longer(cols = matches(".*[1-9][pos|neg]"),
+                   names_to = c("trial", "type"),
+                   names_pattern = "x(\\d)(.*)",
+                   values_to = "value") %>%
+    mutate(
+      trial = as.integer(trial),
+      type = ifelse(type == "pos", "gain", "loss")  # Assign gain/loss
+    ) %>% 
+    pivot_wider(names_from = type, values_from = value) %>%
+    nest(data = c(trial, gain, loss))
+  plan(multisession)
+    # Measure system time for paralleled processing
+  print(Sys.time())
+  tm <- system.time({
+    LA_result <- LA_result %>%
+      # slice_sample(n = 1000) %>% 
+      mutate(
+        KT_mean = future_map_dbl(data, ~ KT(.x, output = "coefficient", type = "mean")),
+        KT_median = future_map_dbl(data, ~ KT(.x, output = "coefficient", type = "median")),
+        KT_reg = future_map_dbl(data, ~ KT_reg_fast(., output = "coefficient"))
+      )
+  })
+  print(tm)
+  # Save LA_result as an RDS file
+  saveRDS(LA_result, file = file_path)
+  print(paste("File saved at:", file_path))
+}
+
+```
+
+```{r}
+LA_summ <- LA_result %>% 
+  select(!c(x0, data)) %>% 
+  pivot_longer(KW:KT_reg,
+               names_to = "LA_type",
+               values_to = "LA_est") %>% 
+  left_join(trueLA_df, by = join_by(alpha, beta, lambda, LA_type)) %>% 
+  group_by(lambda, phi, method, LA_type) %>% 
+  summarise(
+    bias = mean((LA_est - true_LA_est), na.rm = TRUE),
+    RMSE = mean((LA_est - true_LA_est)^2, na.rm = TRUE),
+    .groups = "drop"
+  )
+  
+```
+
+```{r eval=FALSE, fig.height=10, fig.width=15, include=FALSE}
+LA_result %>%
+  select(!c(x0, data)) %>% 
+  pivot_longer(KW:KT_reg,
+               names_to = "LA_type",
+               values_to = "LA_est") %>% 
+  left_join(trueLA_df, by = join_by(alpha, beta, lambda, LA_type)) %>% 
+  mutate(lambda = factor(lambda)) %>% 
+  group_by(lambda, phi, method, LA_type, ) %>% 
+  ggplot() +
+  geom_vline(
+    aes(xintercept = true_LA_est),
+    lty=2, color = "grey30", linewidth =1.05
+    ) +
+  stat_summary(
+    aes(x = LA_est, y = method, color = early_stop),
+    geom = "errorbar",
+    position = position_dodge(0.6),
+    fun.min = function(x) quantile(x, 0.025, na.rm = TRUE),
+    fun.max = function(x) quantile(x, 0.975, na.rm = TRUE),
+    linewidth = 1.2
+  ) +
+  stat_summary(
+    aes(x = LA_est, y = method, color = early_stop, shape = early_stop),
+    position = position_dodge(0.6),
+    fun = mean,
+    geom = "point",
+    size = 3.5,
+  ) +
+  # xlim(0, 6) +
+  facet_grid(phi ~ LA_type,
+             # labeller = "label_both"
+             scales = "free"
+            ) +
+  labs(x = "Loss Aversion Coefficient",
+   y = "Methods",
+   color = "Itertation Number",
+   shape = "Itertation Number",
+   title = "Loss Aversion Coefficients Estimates") +
+  theme(
+    legend.position = "bottom",
+    axis.title = element_text(size = 16),
+    axis.text.x = element_text(vjust = 0.5, hjust = 0.5),
+    axis.text = element_text(size = 13),
+    strip.text= element_text(size = 14)
+    )
+
+```
+
+### Bias and RMSE
+
+bias 和 RMSE 都是 ASA 最好
+
+
+```{r fig.height=10, fig.width=13}
+LA_summ  %>% 
+  filter(is.finite(bias)) %>% 
+  # filter(!method %in% c("MOBS", "PEST", "PEST_randInit")) %>% 
+  # filter(early_stop == 10) %>%
+  mutate(lambda = as.factor(lambda)) %>%
+  ggplot(aes(x = method)) +
+  geom_hline(yintercept = 0, color = "grey30", lty = 2, alpha = 0.8) +
+  geom_point(aes(y = bias,
+               shape = lambda,
+               color = lambda,
+               group = lambda),
+             position = position_dodge(width = 0.4),
+             size = 3.0) +
+  facet_grid(rows = vars(phi),
+             cols = vars(LA_type),
+             scales = "free_y"
+             ) +
+  # scale_y_continuous(breaks = seq(-1, 3.5, .5)) +
+  labs(x = "Method",
+       y = "Bias",
+       color = "Lambda",
+       shape = "Lambda",
+       title = "Loss Aversion Coefficients: Bias")+
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(size = 11, angle = 90, vjust = .55),
+        legend.title = element_text(size = 16),
+        strip.text= element_text(size = 13),
+        legend.text = element_text(size = 14),
+        title = element_text(size = 18))
+```
+
+
+```{r fig.height=10, fig.width=13}
+LA_summ  %>% 
+  filter(is.finite(RMSE)) %>% 
+  # filter(!method %in% c("MOBS", "PEST", "PEST_randInit")) %>% 
+  # filter(early_stop == 10) %>%
+  mutate(lambda = as.factor(lambda)) %>%
+  ggplot(aes(x = method)) +
+  geom_hline(yintercept = 0, color = "grey30", lty = 2, alpha = 0.8) +
+  geom_point(aes(y = RMSE,
+               shape = lambda,
+               color = lambda,
+               group = lambda),
+             position = position_dodge(width = 0.4),
+             size = 3.0) +
+  facet_grid(rows = vars(phi),
+             cols = vars(LA_type),
+             scales = "free_y"
+             ) +
+  # scale_y_continuous(breaks = seq(-1, 3.5, .5)) +
+  labs(x = "Method",
+       y = "RMSE",
+       color = "Lambda",
+       shape = "Lambda",
+       title = "Loss Aversion Coefficients: RMSE") +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(size = 11, angle = 90, vjust = .55),
+        legend.title = element_text(size = 16),
+        strip.text= element_text(size = 13),
+        legend.text = element_text(size = 14),
+        title = element_text(size = 18))
+```
+

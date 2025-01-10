@@ -6,11 +6,49 @@ source("../player_and_lotteries.R")
 source("../game_and_exp.R")
 source("../TO_exp.R")
 
+# Paths -------------------------------------------------------------------
+dir_name <- "./simulation_Rmds/ASA_simulation_RDS/"
+file_names <- "early_stop_varyLambda_df.RDS"
+fname <- paste0(dir_name, file_names)
+# Create a global log file
+script_dir <- dirname(rstudioapi::getSourceEditorContext()$path)
+log_file <- file.path(script_dir, "logs",
+                      paste0("Fixed_Boundary_log_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
+dir.create("logs", showWarnings = FALSE)
+write_process_log <- function(msg, show_console = TRUE) {
+  
+  timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+  message <- paste0(timestamp, " - ", msg, "\n")
+  cat(message, file = log_file, append = TRUE)
+  if (show_console) {
+    cat(message)
+  }
+}
+
+
 # Simulation Parameters ---------------------------------------------------
+alpha_levels <- c(.88)
+beta_levels <- c(.88)
+lambda_levels <- c(0.5, 1.0, 2.25)
+wp <- 0.5
+wn <- 0.5
+comb_mtx <- 
+  expand.grid(alpha = alpha_levels, beta = beta_levels, lambda = lambda_levels)
 
 Nsim <-  1000L
 .phi <-  0.0367 # err = 1e-8, 0.027513126 is err = 1e-6
-param <- list("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5)
+param_list <- lapply(1:nrow(comb_mtx), function(i) {
+  list(
+    alpha = comb_mtx$alpha[i],
+    beta = comb_mtx$beta[i],
+    lambda = comb_mtx$lambda[i],
+    wp = wp,
+    wn = wn
+  )
+})
+
+Nsim <-  1000L
+.phi <-  0.0367 # err = 1e-8, 0.027513126 is err = 1e-6
 exp_param <- list(
   init_values =
     list("G"= 2000L,
@@ -32,13 +70,6 @@ mix_param <- list(
 
 phi_vec <-  c(.phi * 10, .phi, .phi * 0.1)
 phi_names <- c("large", "medium", "small")
-
-# Plotting Parameters --------
-dir_name <- "./simulation_RDS"
-file_names <- "Bisection_mixASA_early_stop.RDS"
-fname <- file.path(dir_name, file_names)
-pic_path <- "./figs/"
-
 method_names <-
   c(
     "Bisection", "Bisection-Slider",
@@ -47,28 +78,13 @@ method_names <-
     paste0(c("ASA", "PEST"), "_randInit"),
     "Bisection_mixASA"
   )|>
-  outer(c(5, 10, 15), paste, sep="_early")|>
+  outer(c(5, 10), paste, sep="_early")|>
   as.vector()
-# Create a global log file
-script_dir <- dirname(rstudioapi::getSourceEditorContext()$path)
-if (!dir.exists(dir_name)) {
-  # create RDS directory
-  dir.create(script_dir, dir_name, showWarnings = FALSE)
-}
-log_file <- file.path(script_dir, "logs",
-                      paste0("Early_Stop_log_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
-dir.create(script_dir, "logs", showWarnings = FALSE)
 
-write_process_log <- function(msg, show_console = TRUE) {
-  timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
-  message <- paste0(timestamp, " - ", msg, "\n")
-  cat(message, file = log_file, append = TRUE)
-  if (show_console) {
-    cat(message)
-  }
-}
 
-process_method <- function(method_name, exp_param, mix_param, phi) {
+# Functions ---------------------------------------------------------------
+# Generate data given method
+process_method <- function(method_name, param, exp_param, mix_param, phi) {
   write_process_log(glue("STARTING: Method {method_name} with phi = {phi}"))
   
   # Modify parameters based on method_name
@@ -117,14 +133,16 @@ process_method <- function(method_name, exp_param, mix_param, phi) {
   result
 }
 
-process_phi <- function(phi, phi_name) {
-
+# Generate data given hyperparemeter of the agent
+process_phi <- function(phi, param) {
   write_process_log(glue("\n=== STARTING phi = {phi} ==="))
-  
+  write_process_log(
+    glue("\n=== with alpha = {param$alpha}, beta = {param$beta}, lambda = {param$lambda}} ===")
+  )
   # Process methods sequentially
   tmp_list <- map(
     method_names,
-    ~process_method(.x, exp_param, mix_param, phi)
+    ~process_method(.x, param, exp_param, mix_param, phi)
   )
   names(tmp_list) <- gsub("Bisection-Slider", "Bisection_Slider", method_names)
   
@@ -136,7 +154,7 @@ process_phi <- function(phi, phi_name) {
   tmp.df
 }
 
-# Main execution
+# Main Execution ----------------------------------------------------------
 if (file.exists(fname)) {
   target_list <- readRDS(fname)
   cat(glue("{fname} Exists and Readed"))
@@ -147,17 +165,40 @@ if (file.exists(fname)) {
   
   # Process everything sequentially except for the internal Nsim parallelization
   target_list <- list()
-  for (i in seq_along(phi_vec)) {
-    phi <- phi_vec[i]
-    phi_name <- phi_names[i]
-    target_list[[phi_name]] <- process_phi(phi, phi_name)
+  for (p in param_list) {
+    param_name <- glue("alpha{p$alpha}_beta{p$beta}_lambda{p$lambda}")
+    
+    # Process each phi and collect results
+    tmp_list <- lapply(seq_along(phi_vec), function(i) {
+      phi <- phi_vec[i]
+      process_phi(phi, param = p)
+    })
+    # Combine results into a data frame
+    names(tmp_list) <- phi_names
+    tmp_df <- tmp_list %>%
+      bind_rows(.id = "phi")
+    
+    target_list[[param_name]] <- tmp_df
   }
-  
+  rm(tmp_df)
+  # Combine all parameter results into a single data frame
+  target_df <- target_list %>%
+    bind_rows(.id = "param") %>% 
+    separate_wider_regex(
+      param,
+      patterns =
+        c("alpha", alpha = "\\d+\\.\\d+","_beta",
+          beta = "\\d+\\.\\d+", "_lambda",
+          lambda= "\\d+\\.?\\d*")
+    ) %>% 
+    mutate(
+      across(c(alpha, beta, lambda), as.numeric),
+    )
   # Save results
   if (!dir.exists(dir_name)) {
     dir.create(dir_name)
   }
-  saveRDS(target_list, file = fname)
+  saveRDS(target_df, file = fname)
   
   write_process_log(glue("=== Simulation Completed at {Sys.time()} ==="))
 }

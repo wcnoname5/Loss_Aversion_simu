@@ -193,23 +193,23 @@ Lotteries <- R6Class(
     update_result = function(choice) {
       private$.result <- choice
     },
-    find_optimal = function(params, est_quant){
+    find_optimal = function(params, est_quant){ 
       wp_50 <- params$wp
       wn_50 <- params$wn
       lambda <- params$lambda
       .alpha <- params$alpha
       .beta <- params$beta
-      if (est_quant==1){
+      if (est_quant == 1){
         # result <- -((utility(self$A[1],
         #                      params, "CRRA")/lambda)^(1/.beta)
         result <- -(utility(self$A[1], params, "CRRA")*
                      (wp_50/wn_50))
         # print(result)
         result <- inv_utility(result, params)
-      } else if (est_quant %in% c(2,3)){
+      } else if (est_quant %in% c(2, 3)){
         result <- wp_50 * utility(self$A[1], params, "CRRA") +
           wn_50 * utility(self$A[2], params, "CRRA")
-        result <- inv_utility(result)
+        result <- inv_utility(result, params)
       } else {
         UA <- (wp_50 * utility(self$A[1], params, "CRRA")) +
             (wn_50 * utility(self$A[2], params, "CRRA"))
@@ -221,7 +221,7 @@ Lotteries <- R6Class(
           U_diff <- UA - (wn_50 * utility(self$B[2], params, "CRRA"))
           prob_weight <- wp_50
         }
-        result <-  inv_utility(U_diff/prob_weight)
+        result <-  inv_utility(U_diff/prob_weight, params)
       }
       return(round(result))
     }
