@@ -1,5 +1,5 @@
 ---
-title: "Varying Value Function"
+title: "Bisection Simulation: Whole utility Curve"
 author: "Wei-Chen Chang"
 date: "`r Sys.Date()`"
 output: 
@@ -15,6 +15,8 @@ output:
      self-contained: true
      number_sections: false
      df_print: paged
+bibliography: "CPT_LA_new.bib"  
+csl: "apa.csl"
 ---
 
 ```{r setup, include=FALSE}
@@ -36,8 +38,8 @@ library(magrittr)
 library(patchwork)
 library(kableExtra)
 # import functions
-source("E:/Proj/Loss_Aversion_simu/functions/player_and_lotteries.R")
-
+source("../functions/player_and_lotteries.R")
+# source("../functions/TO_exp.R")
 # ggplot settings
 theme_set({
   theme_bw()+    
@@ -49,48 +51,49 @@ theme_set({
         legend.text = element_text(size = 14),
         title = element_text(size = 18))
 })
-
-# directories
-dir_name <- "./ASA_simulation_RDS"
-pic_path <- "./figs"
 ```
 
-# Settings
 
-```{r params, include=FALSE}
+# Simulation Setting(Code Part)
+
+```{r params}
+# Simulation Parameters
 Nsim <-  1000L
-phi <-  0.0367 # err = 1e-8, 0.027513126 is err = 1e-6
+.phi <-  0.0367 # err = 1e-8, 0.027513126 is err = 1e-6
 param <-  list("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5)
 exp_param <- list(
   init_values =
-    list("G" = 2000L, "g" = 300L, "l" = -300L),
+    list("G"= 2000L,
+         "g"=300L, "l"=-300L, "x1+"=1000L),
   random_init = FALSE,
   fix_bnd_width = FALSE,
   n_est = 3L + (6*2L),
   min_step = 0L,
   step_size = 320L
 )
-# plot labels
-latex_labels <- c(
-  expression(x[6]^"-"), expression(x[5]^"-"), expression(x[4]^"-"),
-  expression(x[3]^"-"), expression(x[2]^"-"), expression(x[1]^"-"),
-  expression(x[1]^"+"), expression(x[2]^"+"), expression(x[3]^"+"),
-  expression(x[4]^"+"), expression(x[5]^"+"), expression(x[6]^"+")
-)
+mix_param <- list(
+  est_method = "ASA", # changed method type: ASA, UD
+  start_crit = 500L, # Bisection 3 Times
+  start_step = 100L, # ASA_c = 2*100
+  stop_rev_times = 3L,
+  UseMidrunEst = TRUE 
+) 
+phi_vec <- c(.phi*10, .phi, .phi*0.1)
+names(phi_vec) <- c("large", "medium", "small")
 ```
 
 
-# Intro
+## Directories
 
-改變 Agent 服從的 value function， 不同方法下是否會有不同結果?
+```{r dir_params}
+dir_name <- "./ASA_simulation_RDS"
+pic_path <- "./figs"
+```
 
-  -   把 power function 中 $\lambda$ 變成 3 種 levels: 0.5, 1, 2.25.
+## Cleaning and Plotting Functions
 
-
-
-## pre-process
-
-```{r preproc_func}
+```{r cleaning_func}
+# pivot longer and change 
 utility_longer <- function(df){
   
   util.levels <- c(paste0("x", 6:1, "neg"),
@@ -110,17 +113,40 @@ utility_longer <- function(df){
   new_df
 }
 
+# saving pics
+save_fig <- function(pname, p_path = pic_path,
+                     width = 13, height = 8) {
+  
+  if (!file.exists(file.path(p_path, pname))) {
+    ggsave(filename = pname,
+           width = width,
+           height = height,
+           units = "in",
+           device = "pdf",
+           path = p_path)
+  } else {
+    cat("File already exists. Not saving:", file.path(pic_path, pname), "\n")
+  }
+}
 
-util.levels <- c(paste0("x", 6:1, "neg"),
-                      "x0",
-                      paste0("x", 1:6, "pos"))
+
+# fig labels in math expression style
+latex_labels <- c(
+  expression(x[6]^"-"), expression(x[5]^"-"), expression(x[4]^"-"),
+  expression(x[3]^"-"), expression(x[2]^"-"), expression(x[1]^"-"),
+  expression(x[1]^"+"), expression(x[2]^"+"), expression(x[3]^"+"),
+  expression(x[4]^"+"), expression(x[5]^"+"), expression(x[6]^"+")
+)
 ```
 
-```{r read_file}
-test_df <- 
-  readRDS(
-    "E:/Proj/Loss_Aversion_simu/simulation_Rmds/ASA_simulation_RDS/boundary_lambda_vary.RDS"
-    ) %>% 
+
+# Simulation 1 (new version)
+
+```{r bound2}
+file_name <- "boundary_lambda_vary.RDS"
+fname <- file.path(dir_name, file_name)
+
+bound_df <- read_rds(fname) %>% 
   rename(method = method_type) %>% 
   select(phi, method, alpha:lambda, Nsim, any_of("early_stop"),
          matches("^x[1-9](pos|neg)_est")) %>% 
@@ -128,8 +154,7 @@ test_df <-
   add_column(x0 = 0L, .before = "x1pos")
 
 # Add true value
-test_df <- test_df %>%
-  # filter(phi == "medium") %>% # vary lambda, fix phi level
+bound_df <- bound_df %>%
   nest(data = !c(alpha:lambda)) %>%
   rowwise() %>%
   mutate(
@@ -147,7 +172,7 @@ test_df <- test_df %>%
   select(!matches("truev_(L(_2)?|G_2|lambda_KW)$")) # L, L2 G2 orlambdaKW
 
 # unnest and pivot_longer
-true_df <- test_df %>%
+true_df <- bound_df %>%
   add_column(truev_x0 = 0) %>% 
   pivot_longer(
     cols = starts_with("truev"), 
@@ -155,22 +180,31 @@ true_df <- test_df %>%
     values_to = "true_value") %>% 
   mutate(utility = utility |>
            str_remove("^truev_")|>
-           factor(labels = -6:6, levels = util.levels)
+           factor(labels = -6:6,
+                  levels =
+                    c(paste0("x", 6:1, "neg"),
+                      "x0",
+                      paste0("x", 1:6, "pos")))
          ) %>% 
   select(!data)
 
-cleaned_df <- test_df %>%
-  select(alpha: data) %>% 
-  unnest(data) %>%
+cleaned_df <- bound_df %>%
+  select(alpha:data) %>% 
+  unnest() %>%
   utility_longer() %>% 
   left_join(true_df, by = join_by(alpha, beta, lambda, utility))
-  
+
 ```
 
-```{r eval=FALSE, fig.height=20, fig.width=8, include=FALSE}
+## Utility Curve Plots
+
+顏色線段代表 95% 的觀測值分布範圍長度。黑色虛線為實際數值
+
+```{r, fig.height=6.5, fig.width=12}
 cleaned_df %>% 
+  filter(lambda == 2.25 & phi != "small") %>%
+  # filter(lambda == 2.25 ) %>%
   group_by(phi) %>% 
-  filter(phi != "small") %>%
   ggplot(aes(y = utility)) +
   geom_hline(
     yintercept = 
@@ -189,6 +223,7 @@ cleaned_df %>%
   geom_point(
     aes(y = utility, x = true_value, group = 1),
     color = "black", pch = 1, size =2.5) +
+  # 95% range
   stat_summary(
     aes(y = utility, x = x_value, color = phi, shape = phi),
     geom = "pointrange",
@@ -199,25 +234,133 @@ cleaned_df %>%
     linewidth = 1.1, size = 0.6, alpha=.8
   ) +
   labs(x = "Elicited x ", y = "Values", color = "phi") +
-  facet_grid(method ~ lambda, scales = "free_x") +
+  facet_wrap(~ method, dir="v", ncol=5, nrow=2) +
   theme(
     legend.position = "bottom",
     axis.title = element_text(size = 16),
     axis.text.x = element_text(angle = 45, hjust = 1),
     axis.text = element_text(size = 13),
-    strip.text= element_text(size = 13),
+    strip.text= element_text(size = 14),
     legend.text = element_text(size = 15)) +
   ggtitle(glue("Value Curve"))
+
+pname <- "study1_utility_curve.pdf"
+
+if (!file.exists(file.path(pic_path, pname))) {
+  ggsave(filename = pname,
+         width = 12,
+         height = 6.5,
+         units = "in",
+         device = "pdf",
+         path = pic_path)
+} else {
+  cat("File already exists. Not saving:", file.path(pic_path, pname), "\n")
+}
 ```
-
-
-
 
 ## Bias and RMSE
 
-```{r fig.height=8, fig.width=20}
+
+```{r summ_biasRMSE}
 df.bias_RMSE <- cleaned_df %>%
   filter(utility != 0) %>% 
+  mutate(
+    method = case_when(
+      method == "Bisection_Slider" ~ "Bisection-Slider",
+      method == "Bisection_Slider_fixbnd" ~ "Bisection-Slider_fixbnd",
+      TRUE ~ method # Keep other values unchanged
+    ),
+    boundary_type = case_when(
+      grepl(".*_fixbnd$", method) ~ "fix_bnd",
+      grepl(".*_randInit$", method) ~ "rand_init",
+      TRUE ~ "equal_exp"
+    ),
+    method = str_replace(method, "_(randInit|fixbnd)$", "")
+  ) %>% 
+  group_by(phi, method, boundary_type, utility, lambda) %>% 
+  summarise(
+   bias = mean(x_value - true_value)|> round(),
+   RMSE = 
+     (x_value - true_value)^2 |> 
+     mean() |>
+     sqrt() |>
+     round(),
+   .groups = "drop"
+   )
+```
+
+### Bias
+
+```{r bias_bnd, fig.height=7, fig.width=13}
+df.bias_RMSE %>% 
+  filter(lambda == 2.25) %>% 
+  ggplot(aes(x = utility)) +
+  geom_line(aes(
+    x = utility,
+    y = bias,
+    color = boundary_type,
+    group = boundary_type),
+    linewidth = 1.2,
+    alpha = 0.8
+    ) +
+  geom_hline(yintercept = 0, color = "grey30", lty=2, alpha=0.8)+
+  geom_point(
+    aes(
+      y = bias,
+      color = boundary_type,
+      shape = boundary_type),
+    size = 3) +
+  facet_grid(rows = vars(phi),
+             cols = vars(method),
+             # scales = "free_y"
+             ) +
+  scale_x_discrete(labels = latex_labels) +
+  scale_color_discrete(
+    # values = c("fix_bnd" = "cyan4", "equal_exp" = "orange2"),
+    labels = c("fix_bnd" = "Boundary Width = 5000",
+               "equal_exp" = "Equal Expectation",
+               "rand_init" = "Random Initial"),
+    name = "Variants") +
+  scale_shape_manual(
+    values = c("fix_bnd" = 16, "equal_exp" = 17, "rand_init" = 15),
+    labels = c("fix_bnd" = "Boundary Width = 5000",
+               "equal_exp" = "Equal Expectation",
+               "rand_init" = "Random Initial"),
+    name = "Variants") +
+  labs(x = "x_i",
+       y = "Bias",
+       title = "Bias")+
+  theme(
+    legend.position = "bottom",
+    axis.title = element_text(size = 16),
+    axis.text.x = element_text(vjust = 0.5, hjust = 0.5),
+    axis.text = element_text(size = 13),
+    strip.text= element_text(size = 14),
+    legend.text = element_text(size = 15)
+    )
+
+pname <- "study1_bias.pdf"
+
+save_fig(pname, width = 13, height = 7)
+```
+
+
+### Bias2
+
+Vary in $\lambda$ in the value function.
+
+-   3 levels: 0.5, 1, 2.25.
+
+```{r bias_vary_lambda, fig.height=7, fig.width=21}
+df.tmp <- cleaned_df %>%
+  filter(utility != 0) %>% 
+  mutate(
+    method = case_when(
+      method == "Bisection_Slider" ~ "Bisection-Slider",
+      method == "Bisection_Slider_fixbnd" ~ "Bisection-Slider_fixbnd",
+      TRUE ~ method # Keep other values unchanged
+    )
+    ) %>% 
   group_by(phi, method, utility, lambda) %>% 
   summarise(
    bias = mean(x_value - true_value)|> round(),
@@ -227,12 +370,8 @@ df.bias_RMSE <- cleaned_df %>%
      round(),
    .groups = "drop"
    )
-```
 
-## Bias
-
-```{r bias, fig.height=8, fig.width=20}
-df.bias_RMSE %>% 
+df.tmp %>% 
   mutate(lambda = as.factor(lambda)) %>%
   ggplot(aes(x = utility)) +
   geom_line(aes(
@@ -251,7 +390,7 @@ df.bias_RMSE %>%
     size = 3) +
   facet_grid(rows = vars(phi),
              cols = vars(method),
-             scales = "free_y"
+             # scales = "free_y"
              ) +
   scale_x_discrete(labels = latex_labels) +
   labs(x = "x_i",
@@ -270,82 +409,110 @@ df.bias_RMSE %>%
 
 pname <- "study1_bias_different_Lambda.pdf"
 
-if (!file.exists(file.path(pic_path, pname))) {
-  ggsave(filename = pname,
-         width = 21,
-         height = 7,
-         units = "in",
-         device = "pdf",
-         path = pic_path)
-} else {
-  cat("File already exists. Not saving:", file.path(pic_path, pname), "\n")
-}
+save_fig(pname, width = 21, height = 7)
+rm(df.tmp)
 ```
 
-- 當 $\phi$ 小的時候，equal expectation 表現比 fix_bound 還好，有可能問題不是boundary 沒包到真值。這部分要思考如何解釋
 
-- $\lambda = 0.5$ 下的biasedness 問題可能來自 starting point 離真值太遠，所以不管是不是bisection-based method，都有類似的pattern (因為起始點決定方法一樣).
+### RMSE
 
-- 再討論(or 畫看看整個選擇的trace)
-
-
-## RMSE
-
-```{r RMSE, fig.height=8, fig.width=20}
+```{r RMSE_bnd, fig.height=7, fig.width=13}
 df.bias_RMSE %>% 
-  mutate(lambda = as.factor(lambda)) %>%
+  filter(lambda == 2.25) %>% 
   ggplot(aes(x = utility)) +
   geom_line(aes(
     x = utility,
     y = RMSE,
-    color = lambda,
-    group=lambda),
+    color = boundary_type,
+    group = boundary_type),
     linewidth = 1.2,
     alpha = 0.8
     ) +
-  # geom_hline(yintercept = 0, color = "grey30", lty=2, alpha=0.8)+
+  # geom_hline(yintercept = c(500,-500), color = "red2", lty=2, alpha=0.8)+
   geom_point(
     aes(
       y = RMSE,
-      color = lambda),
+      color = boundary_type,
+      shape = boundary_type),
     size = 3) +
   facet_grid(rows = vars(phi),
              cols = vars(method),
-             scales = "free_y"
+             # scales = "free_y"
              ) +
+  scale_x_discrete(labels = latex_labels) +
+  scale_color_discrete(
+    # values = c("fix_bnd" = "cyan4", "equal_exp" = "orange2"),
+    labels = c("fix_bnd" = "Boundary Width = 5000",
+               "equal_exp" = "Equal Expectation",
+               "rand_init" = "Random Initial"),
+    name = "Variants") +
+  scale_shape_manual(
+    values = c("fix_bnd" = 16, "equal_exp" = 17, "rand_init" = 15),
+    labels = c("fix_bnd" = "Boundary Width = 5000",
+               "equal_exp" = "Equal Expectation",
+               "rand_init" = "Random Initial"),
+    name = "Variants") +
+  labs(x = "x_i",
+       y = "RMSE",
+       title = "RMSE")+
   theme(
     legend.position = "bottom",
     axis.title = element_text(size = 16),
-    # axis.text.x = element_text(angle = 45, hjust = 1),
-    axis.text = element_text(size = 12),
-    strip.text= element_text(size = 13),
-    legend.text = element_text(size = 15)) +
-  ggtitle(glue("RMSE"))
+    axis.text.x = element_text(vjust = 0.5, hjust = 0.5),
+    axis.text = element_text(size = 13),
+    strip.text= element_text(size = 14),
+    legend.text = element_text(size = 15)
+    )
 
+pname <- "study1_RMSE.pdf"
+save_fig(pname, width = 13, height = 7)
 ```
 
 
+## Step Count
 
-# Loss Aversion
+```{r eval=FALSE, include=FALSE}
+len_df <- read_rds(fname) %>% 
+  select(alpha:Nsim, ends_with("len")) %>%
+  mutate(
+    method = str_replace(method_type, "_(randInit|fixbnd)$", ""),
+    variant = ifelse(
+        grepl(".*_fixbnd$", method_type),
+        "fix_bnd",
+        ifelse(
+          grepl(".*_randInit$", method_type),
+          "rand_init",
+          "equal_exp")
+        ),
+    .after = phi,
+    .keep = "unused"
+  )
 
+len_df %>% 
+  group_by(phi, lambda,  method, variant) %>% 
+  filter(lambda ==2.25) %>% 
+  mutate(
+    mean_each_step = rowMeans(across(ends_with("len"))),
+    .keep = "unused"
+  ) %>%
+  summarise(
+    mean_step = mean(mean_each_step) |> round(),
+    .groups = "drop"
+  ) %>% 
+  select(!lambda) %>% 
+  write_csv(
+    file = file.path(pic_path, "step.csv")
+  )
 
-## Preprocess
+```
 
-```{r functions}
-# functions for computing Loss Aversion esimates
-KT_reg_fast <- function(data, output) {
-  x <- abs(data$loss)
-  y <- data$gain
-  if (anyNA(x)) stop("x problem")
-  else if (anyNA(y)) stop("y problem")
-  else if (any(x %in% c(-Inf, Inf))) stop("x inf")
-  else if (any(y %in% c(-Inf, Inf))) stop("y inf")
-  coef <- sum(x * y) / sum(x^2)  # Slope estimate for gain ~ 0 + abs(loss)
-  
-  if (output == "coefficient") {
-    coef
-  }
-}
+# Extensions: Loss aversion
+
+## Functions
+
+Functions for computing Loss Aversion esimates
+```{r LA_functions}
+# functions for computing Loss Aversion estimates
 
 get_minusx_utility <- function(x, data, method = c("interpolation", "power_func"), 
                                alpha = NULL, beta = NULL){
@@ -397,12 +564,41 @@ KT <- function(data, output = c("coefficient", "classification", "all"),
     lambda
   }
 }
+
+KT2 <- function(data){
+  gain_max <- max(data$gain)
+  loss_min <- min(data$loss)
+  
+  lambda <- data %>% 
+    pivot_longer(cols = c(gain, loss), names_to = "domain", values_to = 'x') %>% 
+    mutate(utility = (-1)^(domain == "loss") * trial,
+           minusx_utility = map_dbl(x, ~ get_minusx_utility(., data)),
+           utility_ratio = pmap_dbl(list(domain, utility, minusx_utility), 
+                                    ~ switch(..1, 
+                                             gain = abs(..3 / ..2),
+                                             loss = abs(..2 / ..3)))) %>% 
+    summarise(mean = mean(utility_ratio, na.rm = TRUE),
+              median = median(utility_ratio, na.rm = TRUE),
+              n_reasonable_points = sum(!is.na(utility_ratio)),
+              criterion = ceiling(n_reasonable_points / 2),
+              n_ratio_greater_1 = sum(utility_ratio > 1, na.rm = TRUE),
+              n_ratio_less_1 = sum(utility_ratio < 1, na.rm = TRUE)) %>% 
+    mutate(classification = case_when(n_ratio_greater_1 > criterion  ~ "averse",
+                                      n_ratio_less_1 > criterion ~ "seeking",
+                                      TRUE ~ "neutral"))
+  lambda_list <- lambda %>% 
+    select(mean, median, classification) %>% 
+    as.list()
+  # return
+  lambda_list
+}
 ```
 
+## Preprocess
 
 ```{r true_LA}
 # compute True LA coef. values
-trueLA_df <- test_df %>% 
+trueLA_df <- bound_df %>% 
   select(!data) %>% 
   mutate(KW = - truev_x1pos / truev_x1neg) %>% 
   pivot_longer(cols = matches(".*[1-9][pos|neg]"),
@@ -418,27 +614,27 @@ trueLA_df <- test_df %>%
 
 trueLA_df <- trueLA_df %>% 
   mutate(
-      KT_mean = map_dbl(data, ~ KT(.x, output = "coefficient", type = "mean")),
-      KT_median = map_dbl(data, ~ KT(.x, output = "coefficient", type = "median")),
-      KT_reg = map_dbl(data, ~ KT_reg_fast(., output = "coefficient")),
-      .keep = "unused"
+    KT = map(data, ~KT2(.x)),
+    .keep = "unused"
     ) %>% 
-  pivot_longer(cols = KW:KT_reg,
+  unnest_wider(KT, names_sep = "_") %>% 
+  pivot_longer(cols = KW:KT_median,
                names_to = "LA_type",
-               values_to = "true_LA_est")
+               values_to = "true_LA_est") %>% 
+  rename(true_KT_classification = "KT_classification")
 
 ```
 
 
 ```{r compute LA}
-file_path <- file.path(dir_name, "LA_reslut_fixbnd_varylambda_df.RDS")
+file_path <- file.path(dir_name, "LA_fixbnd_df.RDS")
 
 if (file.exists(file_path)) {
   LA_result <- read_rds(file_path)
   print(paste("File read from:", file_path))
 } else {
   library(furrr)
-  LA_result <- test_df %>% 
+  LA_result <- bound_df %>% 
     select(!starts_with("true")) %>% 
     unnest() %>% 
     mutate(KW = -x1pos/x1neg)
@@ -461,10 +657,14 @@ if (file.exists(file_path)) {
     LA_result <- LA_result %>%
       # slice_sample(n = 1000) %>% 
       mutate(
-        KT_mean = future_map_dbl(data, ~ KT(.x, output = "coefficient", type = "mean")),
-        KT_median = future_map_dbl(data, ~ KT(.x, output = "coefficient", type = "median")),
-        KT_reg = future_map_dbl(data, ~ KT_reg_fast(., output = "coefficient"))
-      )
+        KT = future_map(data, ~ KT2(.x)),
+        .keep = "unused"
+        ) %>% 
+      unnest_wider(KT, names_sep = "_") %>% 
+      pivot_longer(cols = KW:KT_median,
+                   names_to = "LA_type",
+                   values_to = "LA_est")
+    
   })
   print(tm)
   # Save LA_result as an RDS file
@@ -476,10 +676,7 @@ if (file.exists(file_path)) {
 
 ```{r}
 LA_summ <- LA_result %>% 
-  select(!c(x0, data)) %>% 
-  pivot_longer(KW:KT_reg,
-               names_to = "LA_type",
-               values_to = "LA_est") %>% 
+  select(!x0) %>%
   left_join(trueLA_df, by = join_by(alpha, beta, lambda, LA_type)) %>% 
   group_by(lambda, phi, method, LA_type) %>% 
   summarise(
@@ -487,25 +684,21 @@ LA_summ <- LA_result %>%
     RMSE = mean((LA_est - true_LA_est)^2, na.rm = TRUE),
     .groups = "drop"
   )
-  
 ```
 
-```{r eval=FALSE, fig.height=10, fig.width=15, include=FALSE}
+```{r eval=FALSE, fig.height=12, fig.width=12, include=FALSE}
 LA_result %>%
-  select(!c(x0, data)) %>% 
-  pivot_longer(KW:KT_reg,
-               names_to = "LA_type",
-               values_to = "LA_est") %>% 
+  select(!x0) %>% 
   left_join(trueLA_df, by = join_by(alpha, beta, lambda, LA_type)) %>% 
   mutate(lambda = factor(lambda)) %>% 
-  group_by(lambda, phi, method, LA_type, ) %>% 
+  group_by(lambda, phi, method, LA_type) %>% 
   ggplot() +
   geom_vline(
-    aes(xintercept = true_LA_est),
-    lty=2, color = "grey30", linewidth =1.05
+    aes(xintercept = true_LA_est, color = lambda),
+    lty=2, linewidth =1.05
     ) +
   stat_summary(
-    aes(x = LA_est, y = method, color = early_stop),
+    aes(x = LA_est, y = method, color = lambda),
     geom = "errorbar",
     position = position_dodge(0.6),
     fun.min = function(x) quantile(x, 0.025, na.rm = TRUE),
@@ -513,8 +706,8 @@ LA_result %>%
     linewidth = 1.2
   ) +
   stat_summary(
-    aes(x = LA_est, y = method, color = early_stop, shape = early_stop),
-    position = position_dodge(0.6),
+    aes(x = LA_est, y = method, color = lambda, shape = lambda),
+    position = position_dodge(0.8),
     fun = mean,
     geom = "point",
     size = 3.5,
@@ -608,4 +801,9 @@ LA_summ  %>%
         legend.text = element_text(size = 14),
         title = element_text(size = 18))
 ```
+
+---
+# References
+
+
 

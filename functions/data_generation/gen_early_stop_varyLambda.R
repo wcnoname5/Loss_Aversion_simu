@@ -1,19 +1,21 @@
 library(glue)
+library(tidyr)
 library(purrr)
 library(stringr)
 
+# Modify the path
 source("../player_and_lotteries.R")
 source("../game_and_exp.R")
 source("../TO_exp.R")
+dir_name <- "./simulation_Rmds/ASA_simulation_RDS/"
 
 # Paths -------------------------------------------------------------------
-dir_name <- "./simulation_Rmds/ASA_simulation_RDS/"
 file_names <- "early_stop_varyLambda_df.RDS"
 fname <- paste0(dir_name, file_names)
 # Create a global log file
 script_dir <- dirname(rstudioapi::getSourceEditorContext()$path)
 log_file <- file.path(script_dir, "logs",
-                      paste0("Fixed_Boundary_log_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
+                      paste0("Early_Stop", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
 dir.create("logs", showWarnings = FALSE)
 write_process_log <- function(msg, show_console = TRUE) {
   
@@ -29,7 +31,8 @@ write_process_log <- function(msg, show_console = TRUE) {
 # Simulation Parameters ---------------------------------------------------
 alpha_levels <- c(.88)
 beta_levels <- c(.88)
-lambda_levels <- c(0.5, 1.0, 2.25)
+# lambda_levels <- c(0.5, 1.0, 2.25)
+lambda_levels <- c(2.25)
 wp <- 0.5
 wn <- 0.5
 comb_mtx <- 
@@ -37,6 +40,11 @@ comb_mtx <-
 
 Nsim <-  1000L
 .phi <-  0.0367 # err = 1e-8, 0.027513126 is err = 1e-6
+
+phi_vec <-  c(.phi * 10, .phi, .phi * 0.1)
+phi_names <- c("large", "medium", "small")
+# phi_names <- c("high", "medium", "low")
+
 param_list <- lapply(1:nrow(comb_mtx), function(i) {
   list(
     alpha = comb_mtx$alpha[i],
@@ -47,8 +55,6 @@ param_list <- lapply(1:nrow(comb_mtx), function(i) {
   )
 })
 
-Nsim <-  1000L
-.phi <-  0.0367 # err = 1e-8, 0.027513126 is err = 1e-6
 exp_param <- list(
   init_values =
     list("G"= 2000L,
@@ -67,12 +73,10 @@ mix_param <- list(
   stop_rev_times = 3L,
   UseMidrunEst = TRUE 
 ) 
-
-phi_vec <-  c(.phi * 10, .phi, .phi * 0.1)
-phi_names <- c("large", "medium", "small")
 method_names <-
   c(
-    "Bisection", "Bisection-Slider",
+    "Bisection", 
+    "Bisection-Slider",
     "MOBS",
     "PEST", "ASA",
     paste0(c("ASA", "PEST"), "_randInit"),
@@ -144,7 +148,8 @@ process_phi <- function(phi, param) {
     method_names,
     ~process_method(.x, param, exp_param, mix_param, phi)
   )
-  names(tmp_list) <- gsub("Bisection-Slider", "Bisection_Slider", method_names)
+  names(tmp_list) <- method_names
+  # gsub("Bisection-Slider", "Bisection_Slider", method_names)
   
   tmp.df <- tmp_list %>%
     bind_rows(.id = "method_type") %>% 

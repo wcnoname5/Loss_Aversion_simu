@@ -1,19 +1,21 @@
 library(glue)
+library(tidyr)
 library(purrr)
 library(stringr)
 
+# Modify the path
 source("../player_and_lotteries.R")
 source("../game_and_exp.R")
 source("../TO_exp.R")
+dir_name <- "./simulation_Rmds/ASA_simulation_RDS/"
 
 # Paths -------------------------------------------------------------------
-dir_name <- "./simulation_Rmds/ASA_simulation_RDS/"
 file_names <- "boundary_lambda_vary.RDS"
 fname <- paste0(dir_name, file_names)
 # Create a global log file
 script_dir <- dirname(rstudioapi::getSourceEditorContext()$path)
 log_file <- file.path(script_dir, "logs",
-                      paste0("Fixed_Boundary_log_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
+                      paste0("Fixed_Boundary", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
 dir.create("logs", showWarnings = FALSE)
 write_process_log <- function(msg, show_console = TRUE) {
 
