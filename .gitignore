@@ -8,3 +8,5 @@
 **/*.html
 figs/
 ASA_files/
+BL2023_data
+*/*.png

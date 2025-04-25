@@ -13,7 +13,7 @@ experiment <- function(
   exp_params,
   phi,
   u_func = c("CRRA", "CARA"),
-  est_type = c("Bisection", "Bisection-Slider", "MOBS", "PEST", "ASA"),
+  est_type = c("Bisection", "Bisection-Slider", "SimpBisection", "MOBS", "PEST", "ASA"),
   ShowTaskLog = FALSE,
   ...
 ) {
@@ -51,7 +51,8 @@ experiment <- function(
     cur_est_type <- est_type
     while (game$show_step(
       est_type = cur_est_type,
-      cur_task_idx = cur_task_idx
+      cur_task_idx = cur_task_idx,
+      cur_trial = trial
     ) >= min_step) {
       # while step size >= min_step
       trial <- trial + 1L
@@ -120,7 +121,7 @@ experiment <- function(
 
 # Generating-Preprocessing Simulation Data ----------------------------------------------
 make_log <- function(n.rep, params, exp_params, phi,
-                     est_type = c("Bisection", "Bisection-Slider", "PEST", "ASA", "MOBS"),
+                     est_type = c("Bisection", "Bisection-Slider", "SimpBisection", "MOBS", "PEST", "ASA"),
                      ...) {
   # Match the argument for estimation type once
   est_type <- match.arg(est_type)

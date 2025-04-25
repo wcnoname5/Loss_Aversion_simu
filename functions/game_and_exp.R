@@ -10,7 +10,7 @@ Game <- R6Class(
   private = list(
     # Attributes
     init_values = # G, L_init, g, l, x1pos
-      list("G"=2000L, "L"=-2000L, "g"=300L, "l"=-300L, "x1+"=1000L),  
+      list("G"=2000L, "g"=300L, "l"=-300L),  
     n_est = 3L,  # no. of estimation. 19L = 5+ 7 + 7
     estimated_pts = 
       c("L", "x1pos", "x1neg", "L2", "G2"), # names of est quant
@@ -18,20 +18,22 @@ Game <- R6Class(
     slider = FALSE, # using slider after `n_trial` bisections
     bound_hist = list(), # For bisection
     est_type = "",
+    # Attributes of SimpBisection
+    first_step = 1000L,
     # Attributes of MOBS
     consis_check = FALSE,
     regression_fill = list(up = 0L, low = 0L),
-    # Attributes for PEST
+    # Attributes of PEST
     last_choice = c(NA, NA, NA, NA), # last element is nearest choice
     PEST_step = 320L,
     max_step = 1280L,
     min_step = 5L,
     extra.step = FALSE,
-    # Attribute for ASA
+    # Attribute of ASA
     m_shift = 0L,
     ASA_c = 2 * 320L,
     ASA_step = 320L,
-    # Attribute for UD (up-down)
+    # Attribute of UD (up-down)
     is.mix = FALSE,
     late_phase_param = list(),
     step_size = 320L,
@@ -89,7 +91,28 @@ Game <- R6Class(
         }
         return(new_stim) # return bisection iteration value
       },
-    # MOBS 
+      
+    # Simplified Bisection (that used in EDP)
+    SimpBisection_update = function(
+      choice, last_stim, cur_task_idx, cur_trial
+    ) {
+      # TODO: determine first_step
+      if (cur_trial == 1) {
+        private$first_step <- abs(last_stim)
+      }
+      # Choose target, Zn = +1 (positive step), else -1 (negative step)
+      Zn <- ifelse(
+        cur_task_idx == 1, # L
+        ifelse(choice == "A", 1L, -1L),
+        ifelse(choice == "B", 1L, -1L)
+      )
+      step <- (((1 / 2) ^ cur_trial) * private$first_step) * Zn
+      step <- round_to_5(step) # forced to multiples of 5
+      new_stim <- last_stim - step # align to ASA
+      return(new_stim) # return bisection iteration value
+    },
+
+    # MOBS
     MOBS_update = function(choice, cur_task_idx, cur_trial) {
       low_stack <- private$bound_hist[[cur_task_idx]][["low"]]
       high_stack <- private$bound_hist[[cur_task_idx]][["up"]]
@@ -169,7 +192,7 @@ Game <- R6Class(
       private$last_choice <- choice
       return(new_stim) # return bisection iteration value
     },
-    ## PEST
+    # PEST
     PEST_update = function(choice, last_stim,
                            cur_task_idx, cur_trial) {
       if (cur_trial == 1) {
@@ -220,7 +243,7 @@ Game <- R6Class(
       return(new_stim)
     },
 
-    ## ASA
+    # ASA
     ASA_update = function(
       choice, last_stim, cur_task_idx, cur_trial
     ) {
@@ -296,7 +319,7 @@ Game <- R6Class(
       return(new_stim)
     },
     
-    ## Initialization:
+    # Initialization:
     init_log = function(est_type, init_values, random_init,
                         step_size, fixed_bnd_width = FALSE) {
       if (!is.list(init_values)) {
@@ -306,65 +329,73 @@ Game <- R6Class(
       if (est_type %in% c("Bisection", "Bisection-Slider")) {
         random_init <- FALSE
         names(private$bound_hist) <- private$estimated_pts
-        bnd <- list("up" = 0L, "low" = 0L)
-        bnd_list <- rep(list(bnd),
-                        length(private$estimated_pts))
-        names(bnd_list) <- private$estimated_pts
         #> Set bisection boundaries
         private$bound_hist$L[["up"]] <- 0L
         private$bound_hist$L[["low"]] <- ifelse(
           fixed_bnd_width,
-          min(-5000L, -2L * init_values[["G"]]),
+          -5000,
           -2L * init_values[["G"]]
         )
         private$bound_hist$x1pos[["up"]] <- init_values[["G"]]
         private$bound_hist$x1pos[["low"]] <-  0L
         private$bound_hist$x1neg[["up"]] <-  0L
+      } else if (est_type == "SimpBisection") {
+        fixed_bnd_width <- FALSE
+        private$first_step <- abs(init_values[["G"]])
       } else if (est_type == "PEST") {
         private$extra.step <- FALSE
         private$last_choice <-  c(NA, NA, NA, NA)
       } else if (est_type == "ASA") {
         private$last_choice <- NA
-      }else if (est_type == "MOBS") {
+      } else if (est_type == "MOBS") {
         random_init <- FALSE
         names(private$bound_hist) <- private$estimated_pts
-        #> Set bisection boundaries 
-        private$last_choice <- NA 
+        #> Set bisection boundaries
+        private$last_choice <- NA
         #> High and Low stack
-        private$bound_hist$L[["up"]] <- rep(0L,3)
-        private$bound_hist$L[["low"]] <-  
-          rep(-2L*init_values[["G"]],3)
-        private$bound_hist$x1pos[["up"]] <- 
+        private$bound_hist$L[["up"]] <- rep(0L, 3)
+        if (fixed_bnd_width) {
+          private$bound_hist$L[["low"]] <- rep(-5000L, 3)
+        } else {
+          private$bound_hist$L[["low"]] <-
+            rep(-2L * init_values[["G"]], 3)
+        }
+        private$bound_hist$x1pos[["up"]] <-
           rep(init_values[["G"]],3)
-        private$bound_hist$x1pos[["low"]] <- rep(0L,3)
-        private$bound_hist$x1neg[["up"]] <- rep(0L,3)
+        private$bound_hist$x1pos[["low"]] <- rep(0L, 3)
+        private$bound_hist$x1neg[["up"]] <- rep(0L, 3)
       }
+      # Initialize Logs
       G <- init_values[["G"]]
       private$task_log <-
-        rep(list(c()), length(private$estimated_pts))
+        rep(list(c(Inf)), length(private$estimated_pts))
       names(private$task_log) <- private$estimated_pts
       private$task_log[["L"]] <- 
-        -G +
-        ifelse(!random_init,
-               0,
-               rnorm(1, sd = 100) |> round_to_5())
+        if (fixed_bnd_width) {
+          -as.integer(5000 / 2)
+        } else if (random_init) {
+          -G + round_to_5(rnorm(1, sd = 100))
+        } else {
+          -G
+        }
       private$task_log[["x1pos"]] <- 
-        ((0 + (G)) / 2) +
-        ifelse(!random_init,
-               0,
-               rnorm(1, sd = 100) |> round_to_5())
+        if (random_init) {
+          as.integer((0 + (G)) / 2) + round_to_5(rnorm(1, sd = 100))
+        } else {
+          as.integer((0 + (G)) / 2)
+        }
       
       private$choice_history <- 
         rep(list(c()), length(private$estimated_pts))
       names(private$choice_history) <- private$estimated_pts
     }
   ),
-  ## Public
+  # Public
   public = list(
     initialize =
       function(exp_params,
                est_type =
-               c("Bisection", "Bisection-Slider", "MOBS", "PEST", "ASA"),
+               c("Bisection", "Bisection-Slider", "SimpBisection", "MOBS", "PEST", "ASA"),
                n_est = 3L,
                ...) {
         extra.arg <- list(...)
@@ -533,7 +564,8 @@ Game <- R6Class(
         function(chained_val_name, left_pos, left_neg,
                  right_stim, IsNextPos = FALSE,
                  random_init = FALSE, fix_bnd_width = FALSE) {
-          if (fix_bnd_width){
+          # Boundary Setting Rule for bisection-based methods
+          if (fix_bnd_width) {
             if (IsNextPos) {
               # if next update estimate positive, lower bound is left_pos
               lower_bnd <- left_pos
@@ -562,7 +594,7 @@ Game <- R6Class(
           } else {
             invisible()
           }
-          # initialize starting point
+          # Initialize starting point for non-bisection methods
           private$task_log[[chained_val_name]][1] <-
             mid_point + 
             ifelse(
@@ -586,11 +618,11 @@ Game <- R6Class(
         # To avoid extreme cases that L>0
         private$task_log[["x1neg"]][1] <-
           ((L + 0) %/% 2)
-          ifelse(
-            ((random_init) && (L<0)),
-            rnorm(1, sd = 100) |> round_to_5(),
-            0
-            )
+        # ifelse(
+        #   ((random_init) && (L < 0)),
+        #   rnorm(1, sd = 100) |> round_to_5(),
+        #   0
+        #   ) # not sure what this ifelse is working for
 
       } else if (cur_task_idx == EstToNextIdx("x1pos")) {
         # end of x1pos, initialize L2[1]
@@ -655,7 +687,7 @@ Game <- R6Class(
       if (!is.na(extra.arg$phi)) {
         phi <- extra.arg$phi
       }
-      last <- private$task_log[[cur_task_idx]][cur_trial]
+      cur_stim <- private$task_log[[cur_task_idx]][cur_trial]
       isLatePhase <- private$late_phase_param$isLatePhase
       isLatePhase <- ifelse(
         is.null(isLatePhase),
@@ -670,14 +702,14 @@ Game <- R6Class(
       if (est_type == "PEST") {
         value <- private$PEST_update(
           choice,
-          last_stim = last,
+          last_stim = cur_stim,
           cur_task_idx,
           cur_trial
         )
       } else if (est_type == "ASA") {
         value <- private$ASA_update(
           choice,
-          last_stim = last,
+          last_stim = cur_stim,
           cur_task_idx,
           cur_trial
         )
@@ -697,15 +729,26 @@ Game <- R6Class(
       } else if (est_type == "UD") {
         value <- private$UD_update(
           choice,
-          last_stim = last,
+          last_stim = cur_stim,
           cur_task_idx,
           cur_trial
+        )
+      } else if (est_type == "SimpBisection") {
+        value <- private$SimpBisection_update(
+          choice,
+          last_stim = cur_stim,
+          cur_task_idx = cur_task_idx,
+          cur_trial = cur_trial
         )
       }
       cur_est_pt <- private$estimated_pts[cur_task_idx]
 
       # Write task Log
-      step <- self$show_step(est_type, cur_task_idx = cur_task_idx)
+      step <- self$show_step(
+        est_type,
+        cur_task_idx = cur_task_idx,
+        cur_trial = cur_trial
+      )
 
       if (step >= private$min_step) {
         # Writing task_log
@@ -798,6 +841,12 @@ Game <- R6Class(
           0L,
           private$late_phase_param$start_step
         )
+        return(step)
+      } else if (est_type == "SimpBisection") {
+        # TODO: finish computation of step calculation
+        cur_trial <- extra_arg$cur_trial
+        step <- ((1 / 2) ^ cur_trial) * abs(private$first_step)
+        return(step)
       }
     },
 

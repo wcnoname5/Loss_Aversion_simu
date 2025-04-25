@@ -25,7 +25,7 @@ trimmed_obs <- BL2023 %>%
     x3p_diff < quantile(x3p_diff, 0.975)   # Keep rows below the 95th percentile
   )
 
-var_diff <- trimmed_obs
+var_diff <- trimmed_obs %>% 
   pull(x3p_diff) %>% 
   var()
 
@@ -43,7 +43,7 @@ dlaplace <- function(x, mu=0, b=1) {
 BL2023 %>%
   mutate(x3p_diff = `X3+` - `X3+repeat`) %>%
   ggplot(aes(x = x3p_diff)) +
-  geom_histogram(aes(y = ..density..),
+  geom_histogram(aes(y = after_stat(density)),
                  bins = 30, fill = "gray", color = "black", alpha = 0.7) +
   # normal curve
   stat_function(fun = dnorm,

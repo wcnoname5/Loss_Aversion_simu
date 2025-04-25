@@ -1,0 +1,321 @@
+---
+title: "Empirical Study"
+author: "Wei-Chen Chang"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: '2'
+  html_document:
+    toc: yes
+    toc_depth: 2
+    toc_float: yes
+    code-link: yes
+    code-tools: yes
+    code_folding: show
+    code_download: yes
+    code-overflow: scroll
+    self-contained: yes
+    number_sections: no
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	fig.align = "center",
+	warning = FALSE,
+	rows.print=11,
+	paged.print=TRUE
+)
+```
+
+
+```{r lib, message=FALSE, include=FALSE}
+library(tidyverse)
+library(glue)
+library(magrittr)
+library(patchwork)
+# import functions
+source("./functions/analysis_functions.R")
+# ggplot settings
+theme_set({
+  theme_bw()+    
+  theme(axis.title = element_text(size = 16),
+        # axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text = element_text(size = 13),
+        strip.text= element_text(size = 12),
+        legend.title = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        title = element_text(size = 18))
+})
+```
+
+
+# Introduction
+
+-   回去翻過去 EDP 的實驗資料分析有個奇怪的地方，就是發現不少違反 monotonicity 的受試者
+
+    -  bisection method 決定boundary的方法之一就是採用monotonicity，因此不應該發生這件事。
+    
+-   重看當時的實驗程式，發現當時的做法和A學者所提Bisection不同，並沒有紀錄upper/lower bound再取中點，而是先用equal expectation決定初始值，直接以初始值的絕對值* 1/2 當作一開始的step size，之後的step size就一直折半下去。
+
+    -  姑且先稱作simplified Bisection (不用modified 是怕跟MOBS搞混)，取`SimpBisection`
+    
+-   EDP 當時測的樣本點比A學者2016年的多，收到 $x_8^+, x_8^-$，且 Iteration = 5。以下模擬也會以這部分為基準進行討論。
+
+
+## Directories
+
+```{r dir_params}
+dir_name <- "./data"
+pic_path <- "./figs"
+```
+
+
+# Violations of Monotonicity
+
+-   EDP stage 1 的違反比率非常高(20/87, 若只考慮到$x_6^+, x_6^-$, 則(14/87))。
+    
+    -  有一可能也是我們測的樣本點太多。
+
+-   但 simplified Bisection 除了$\phi$ small 時特別高，其他都在3%以下。
+    
+    -   另外違反率大小在目前設定下看起來跟$\lambda$ (i.e., value function)沒有關係，只跟 $\phi$ 有關係。
+    
+    -   從模型角度來看就是因為我們收的受試者選擇較隨機 ($\phi$較小)而非其他緣故
+
+## Read Data and Violations of Monotonicity
+
+```{r message=FALSE}
+util.levels <- c(
+  paste0("x", 8:1, "neg"),
+  paste0("x", 1:8, "pos")
+)
+
+EDP_rawdata <- read_csv("data/EDP_stage1_rawdata.csv")
+
+EDP_rawdata %>% 
+  relocate(util.levels, .after = subject) %>% 
+  rowwise() %>%
+  mutate(
+    violation = is.unsorted(c_across(x8neg:x8pos)),
+    violation.6 = is.unsorted(c_across(x6neg:x6pos)), # keep from x_6- to x_6+ only
+    ) %>%
+  ungroup() %>% 
+  summarise(
+    violation_ratio = glue("{round(sum(violation)/n(), 2) * 100}%"),
+    violation.6_ratio = glue("{round(sum(violation.6)/n(), 2)*100}%"), 
+    violation_count = sum(violation),
+    violation.6_count = sum(violation.6),
+    n = n()
+  )
+```
+
+-   過去研究中資料違反 monotonicity 的比率 (兩者皆使用 3+1 次 iterations 的bisection-slider法)
+
+    -   A學者(2016) 違monotonicity比例(3/75 = `r round(3/75, 3)`)
+
+    -   Bleichrod and L’Haridon (2023) 違反monotonicity比例(10/122 = `r round(10/122, 3)`)
+
+
+## Loss Aversion Coefficients
+
+```{r}
+EDP_nestdata <- EDP_rawdata %>% 
+  relocate(util.levels, .after = subject) %>% 
+  rowwise() %>%
+  mutate(
+    violation.6 = is.unsorted(c_across(x6neg:x6pos)), # keep from x_6- to x_6+ only
+    ) %>%
+  ungroup()
+
+EDP_nestdata <- EDP_nestdata %>% 
+  mutate(KW = - x1pos / x1neg) %>%
+  pivot_longer(cols = matches(".*[1-6][pos|neg]"), # keep x1 - x6 only
+                 names_to = c("trial", "type"),
+                 names_pattern = "x(\\d)(.*)",
+                 values_to = "value") %>%
+  mutate(
+    trial = as.integer(trial),
+    type = ifelse(type == "pos", "gain", "loss")  # Assign gain/loss
+  ) %>% 
+  pivot_wider(names_from = type, values_from = value) %>%
+  select(!x8neg:beta) %>% 
+  nest(data = c(trial, gain, loss))
+```
+
+
+```{r}
+EDP_LA_data <- EDP_nestdata %>% 
+  mutate(
+    KT = map(data, ~ KT2(.x)),
+    KW_classification = case_when(
+      KW > 1 ~ "averse",
+      KW == 1 ~ "neutral",
+      KW < 1 ~ "seeking"
+    ),
+  ) %>%
+  unnest_wider(KT, names_sep = "_") %>% 
+  pivot_longer(cols = c(KW, KT_mean, KT_median),
+               names_to = "LA_type",
+               values_to = "LA_est") %>% 
+  mutate(Classification = if_else(LA_type %in% c("KT_mean", "KT_median"), 
+                                  KT_classification, 
+                                  KW_classification)) %>% 
+  select(!c(matches("*_classification"), data))
+```
+
+
+- `KT` 分類的方式是 $\frac{-U(-x_i^+)}{U(x_i^+)}>1, \frac{U(x_i^-)}{-U(-x_i^-)}>1$ 的比例多於一半 
+
+-   `KT` 係數的估計上，A學者2016和 Bleichrod and L’Haridon (2023)最後的報表似乎只報告`KT_median`，見下圖。
+
+### 剔除違反monotonicity
+```{r}
+EDP_LA_data %>%
+  filter(!violation.6) %>% 
+  group_by(LA_type) %>% 
+  summarise(
+    Median_IQR = glue("{quantile(LA_est, .50) |> round(2)} [{round(quantile(LA_est, .25),2)} - {round(quantile(LA_est, .75),2)}]"),
+    Averse = sum(Classification == "averse"),
+    Seeking = sum(Classification == "seeking"),
+    Neutral = sum(Classification == "neutral")
+)
+# kableExtra::kbl(caption = "Loss Aversion Coefficients",
+# format = "latex")
+```
+
+### 保留違反monotonicity
+```{r}
+LA_result <- EDP_LA_data %>%
+  group_by(LA_type) %>% 
+  summarise(
+    # LA_median = quantile(LA_est, .50) |> round(2),
+    Median_IQR = glue("{quantile(LA_est, .50) |> round(2)}[{round(quantile(LA_est, .25),2)} - {round(quantile(LA_est, .75),2)}]"),
+    Averse = sum(Classification == "averse"),
+    Seeking = sum(Classification == "seeking"),
+    Neutral = sum(Classification == "neutral")
+)
+```
+
+兩表沒有相差太多，正式報告時應該保留前者就好。
+
+```{r}
+past_research <- tribble(
+  ~research, ~LA_type, ~Averse, ~Seeking, ~Neutral,
+  "A2016",   "KT",   58,    10,1,
+  "A2016",   "KW",   56,    14,1,
+  "BL2023", "KT",    73,    39,3,
+  "BL2023", "KW",    73,    35,14
+)
+
+research_summ <- LA_result %>% 
+  add_column(research = "EDP") %>% 
+  bind_rows(past_research) %>% 
+  filter(!LA_type == "KT_mean") %>% 
+  select(!Median_IQR) %>% 
+  mutate(LA_type = case_when(LA_type == "KT_median" ~  "KT",
+                             TRUE ~ LA_type),
+         nAverse = Seeking + Neutral,
+         .after = Averse,
+        .keep = "unused")
+
+
+KT_mtx <- research_summ %>%
+  filter(LA_type == "KT") %>% 
+  select(research, Averse, nAverse) %>%  # Keep relevant columns
+  column_to_rownames(var = "research") %>%  # Set research as row names
+  as.matrix()  # Convert to matrix
+
+KW_mtx <- research_summ %>%
+  filter(LA_type == "KW") %>% 
+  select(research, Averse, nAverse) %>%  # Keep relevant columns
+  column_to_rownames(var = "research") %>%  # Set research as row names
+  as.matrix()  # Convert to matrix
+
+# Chi-squared test
+chisq.test(KW_mtx)
+chisq.test(KT_mtx)
+
+# research_summ %>% 
+#   rowwise() %>% 
+#   mutate(prop_Averse = Averse/(Averse+ nAverse))
+```
+```{r}
+research_summ %>% 
+  group_by(LA_type) %>% 
+  summarise(N = sum(Averse, nAverse))
+```
+
+
+
+-   可以發現在分類上EDP資料裡seeking 的比例比兩個這兩個實驗較多，而loss aversion 係數估計上比較靠近2023的結果。
+
+#### A學者
+
+見Risk 列
+![A2016](pics/A2016_loss.png)
+#### Bleichrod and L’Haridon (2023) 
+
+見risk, High-stakes 列
+
+![BL2023](pics/BL2023_loss.png)
+
+
+
+use `ggmatrix` instead
+
+
+```{r fig.height=6, fig.width=6}
+EDP_LA_data %>% 
+  select(!Classification) %>% 
+  pivot_wider(
+    names_from = LA_type,
+    values_from = LA_est
+              ) %>% 
+  filter(!violation.6) %>%
+  select(KW:KT_median) %>% 
+  GGally::ggpairs(
+    diag = list(
+      continuous =
+        GGally::wrap("barDiag", fill= "grey50", color = "black", bins= 25)
+      ),
+    lower = list(
+      continuous =
+        GGally::wrap("points", fill= "grey50", color = "black", alpha = 0.4)
+      ),
+    upper = list(
+    continuous = function(data, mapping, ...) {
+      GGally::ggally_cor(data, mapping, method = "kendall", 
+                 title = "Kendall")
+    }
+  )
+  ) + 
+  theme(
+    title = element_text(size = 14)
+  ) +
+  ggtitle("Correlations b/t Loss Aversion Coefficients")
+
+ggsave("LAcompare_Corr.pdf", width = 6, height = 6, units = "in")
+```
+
+
+
+## 和 Study 2 其他方法間比較
+
+-   模擬顯示，Simplified-Bisection 在 $\phi$ small 時的違反monotonicity比率甚至比PEST還要誇張。
+
+-   這也能部份解釋 EDP 當時違反monotonicity的情況很嚴重，代表此方法容易導致違反monotonicity。
+
+# 小節
+
+-   EDP 中 simplified Bisection 法在受試者選擇較一致時與Bisection法的表現差不多，但是在 $\phi$ 很小的時候表現非常差。
+  
+    -   RMSE 較大(在gain frame)，且違反monotonicity的比例較高。
+
+-   在 EDP 實驗中產生比較多違反monotonicity的受試者，可能的解釋之一是有許多受試者選擇隨機性較高。
+    
+    -   違反monotonicity如果只和 $\phi$ 有關而和value function無關，或許可以從這方面去推估實驗$\phi$的數值。
+
+
