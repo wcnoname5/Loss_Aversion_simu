@@ -108,7 +108,9 @@ phi_vec <-  c(.phi*10, .phi, .phi*0.1)
 phi_names <- c("large", "medium","small")
 
 # methods
-method_levels <- c("ASA", "ASA_randInit","Bisection", "Bisection-Slider", "Bisection-ASA", "MOBS", "SimpBisection","SimpBisection_randInit", "PEST", "PEST_randInit")
+method_levels <- c("Bisection", "Bisection-Slider","MOBS",
+                   "ASA", "ASA_randInit", "SimpBisection","SimpBisection_randInit",
+                   "PEST", "PEST_randInit", "Bisection-ASA")
 ```
 
 
@@ -229,172 +231,7 @@ early.bias_RMSE <- cleaned_df %>%
 
 結果如下， simplified Bisection (`Simp_Bisection`) 的結果其實與Bisection差不多，RMSE 在gain domain下會比較大。
 
-### Bias
-
-```{r print_bias, eval=FALSE, include=FALSE}
-early.bias_RMSE %>% 
-  filter(early_stop == '10' & phi !="small") %>% 
-  arrange(desc(abs(bias)))
-```
-
-
-```{r, fig.height=6, fig.width=19}
-p.bias <- early.bias_RMSE %>% 
-  ggplot(aes(x = utility)) +
-  geom_line(aes(
-    x = utility,
-    y = bias,
-    color = early_stop,
-    group = early_stop),
-    linewidth = 1.2,
-    alpha = 0.8
-    ) +
-  geom_hline(yintercept = 0, color = "grey20", lty=2, alpha=0.8)+
-  # geom_hline(yintercept = c(-200, 200), color = "red2", lty=3)+
-  geom_point(
-    aes(
-      y = bias,
-      color = early_stop,
-      shape = early_stop),
-    size = 3) +
-  facet_grid(rows = vars(phi),
-             cols = vars(method),
-             scales = "free_y"
-             ) +
-  scale_x_discrete(labels = latex_labels) +
-  scale_shape_manual(
-    values = c("5" = 16, "10" = 17)) +
-  labs(x = "x_i",
-       y = "Bias",
-       color = "Itertation Number",
-       shape = "Itertation Number",
-       title = "Bias (Fixed Iteration)")+
-  theme(
-    axis.text.y = element_text(size=14),
-    )
-
-pname <- "study2_bias.pdf"
-save_fig(pname, width = 19, height = 6)
-
-```
-
-### RMSE
-
-```{r RMSE_early, fig.height=6, fig.width=19}
-p.RMSE <- early.bias_RMSE %>% 
-  # filter(method!="ASA_randInit") %>% 
-  ggplot(aes(x = utility)) +
-  geom_line(aes(
-    x = utility,
-    y = RMSE,
-    color = early_stop,
-    group = early_stop),
-    linewidth = 1.2,
-    alpha = 0.8
-    ) +
-  geom_hline(yintercept = 0, color = "grey20", lty=2, alpha=0.8)+
-  geom_point(
-    aes(
-      y = RMSE,
-      color = early_stop,
-      shape = early_stop),
-    size = 3) +
-  facet_grid(rows = vars(phi),
-             cols = vars(method),
-             scales = "free_y"
-             ) +
-  scale_x_discrete(labels = latex_labels) +
-  scale_shape_manual(
-    values = c("5" = 16, "10" = 17)) +
-  labs(x = "x_i",
-       y = "RMSE",
-       color = "Itertation Number",
-       shape = "Itertation Number",
-       title = "RMSE (Fixed Iteration)")+
-  theme(
-    axis.text.y = element_text(size=14),
-    )
-
-pname <- "study2_RMSE.pdf"
-save_fig(pname, width = 19, height = 6)
-
-```
-
-```{r rows.print= 12}
-early.bias_RMSE %>% 
-  group_by(phi,early_stop, utility) %>%
-  mutate(
-    relative_RMSE = RMSE / RMSE[method == "Bisection"],
-    early_stop = as.factor(early_stop)
-  ) %>% 
-  ungroup() %>% 
-  filter(method != "Bisection") %>% 
-  arrange(phi, method, early_stop, utility)
-```
-
-### relative RMSE
-
-```{r}
-early.bias_RMSE %>% 
-  group_by(phi, utility, early_stop) %>%
-  mutate(
-    relative_RMSE = RMSE / RMSE[method == "Bisection"],
-    early_stop = as.factor(early_stop),
-  ) %>% 
-  filter(early_stop == '10' & phi !="small") %>% 
-  arrange(relative_RMSE) %>% 
-  select(phi:utility, relative_RMSE)
-```
-
-
-```{r rRMSE_early, fig.height=6, fig.width=18}
-p.rRMSE <- early.bias_RMSE %>% 
-  group_by(phi, utility, early_stop) %>%
-  mutate(
-    relative_RMSE = RMSE / RMSE[method == "Bisection"],
-    early_stop = as.factor(early_stop)
-  ) %>% 
-  filter(method != "Bisection") %>% 
-  ggplot(aes(x = utility)) +
-  geom_line(aes(
-    x = utility,
-    y = relative_RMSE,
-    color = early_stop,
-    group = early_stop),
-    linewidth = 1.2,
-    alpha = 0.8
-    ) +
-  geom_hline(yintercept = 1, color = "grey20", lty=2, alpha=0.8)+
-  geom_point(
-    aes(
-      y = relative_RMSE,
-      color = early_stop,
-      shape = early_stop),
-    size = 3) +
-  facet_grid(rows = vars(phi),
-             cols = vars(method),
-             scales = "free_y"
-             ) +
-  scale_x_discrete(labels = latex_labels) +
-  # scale_y_continuous(transform = "log10") +
-  scale_shape_manual(
-    values = c("5" = 16, "10" = 17)) +
-  labs(x = "x_i",
-       y = "relative RMSE",
-       color = "Itertation Number",
-       shape = "Itertation Number",
-       title = "relative RMSE (Fixed Iteration)")+
-  theme(
-    axis.text.y = element_text(size=14),
-    )
-
-pname <- "study2_relativeRMSE.pdf"
-save_fig(pname, width = 18, height = 6)
-
-```
-
-
-### Combine Bias & RMSE
+### Plot Function 
 
 ```{r}
 # Define a wrapper function for plotting
@@ -424,7 +261,7 @@ plot_early_bias_RMSE <- function(data, y_var, title, hline_value) {
     scale_shape_manual(
       values = c("5" = 16, "10" = 17)) +
     labs(
-      x = "x_i",
+      x = expression(x[i]),
       y = title,
       color = "Iteration Number",
       shape = "Iteration Number",
@@ -436,46 +273,167 @@ plot_early_bias_RMSE <- function(data, y_var, title, hline_value) {
 }
 ```
 
+### Bias
+
+```{r print_bias, eval=FALSE, include=FALSE}
+early.bias_RMSE %>% 
+  filter(early_stop == '10' & phi !="small") %>% 
+  arrange(desc(abs(bias)))
+```
 
 
-```{r}
-early.tmp <- early.bias_RMSE %>% 
-  filter(!grepl("_randInit", method))
-
-p.bias <- early.tmp %>% 
+```{r, fig.height=6, fig.width=19}
+p.bias <- early.bias_RMSE %>% 
   plot_early_bias_RMSE("bias", "Bias", 0)
-p.RMSE <- early.tmp %>% 
+
+pname <- "study2_bias.pdf"
+save_fig(pname, width = 19, height = 6)
+
+```
+
+### RMSE
+
+```{r RMSE_early, fig.height=6, fig.width=19}
+p.RMSE <- early.bias_RMSE %>% 
   plot_early_bias_RMSE("RMSE", "RMSE", 0)
 
-# Preprocess data for relative RMSE plot
-p.rRMSE <- early.tmp %>% 
+pname <- "study2_RMSE.pdf"
+save_fig(pname, width = 19, height = 6)
+
+```
+
+### relative RMSE
+
+```{r rows.print= 12}
+early.bias_RMSE %>% 
+  group_by(phi,early_stop, utility) %>%
+  mutate(
+    relative_RMSE = RMSE / RMSE[method == "Bisection"],
+    early_stop = as.factor(early_stop)
+  ) %>% 
+  ungroup() %>% 
+  filter(method != "Bisection") %>% 
+  arrange(phi, method, early_stop, utility)
+```
+
+```{r}
+early.bias_RMSE %>% 
+  group_by(phi, utility, early_stop) %>%
+  mutate(
+    relative_RMSE = RMSE / RMSE[method == "Bisection"],
+    early_stop = as.factor(early_stop),
+  ) %>% 
+  filter(early_stop == '10' & phi !="small") %>% 
+  arrange(relative_RMSE) %>% 
+  select(phi:utility, relative_RMSE)
+```
+
+
+```{r rRMSE_early, fig.height=6, fig.width=18}
+p.rRMSE <- early.bias_RMSE %>% 
+  group_by(phi, utility, early_stop) %>%
+  mutate(
+    relative_RMSE = RMSE / RMSE[method == "Bisection"],
+    early_stop = as.factor(early_stop)
+  ) %>% 
+  filter(method != "Bisection") %>% 
+  plot_early_bias_RMSE("relative_RMSE", "Relative RMSE to Biscetion", 1)
+
+pname <- "study2_relativeRMSE.pdf"
+save_fig(pname, width = 18, height = 6)
+
+```
+
+
+### w/o randInit
+
+Here shows the plot without `_randInit` to make the plot more clear.
+
+```{r fig.height=7, fig.width=14}
+early.tmp <- early.bias_RMSE %>% 
+  # filter(method %in% c("Bisection", "ASA"))
+  filter(!grepl("_randInit$", method)) # filter out 
+
+# Bias
+early.tmp %>% 
+  plot_early_bias_RMSE("bias", "Bias", 0) +
+  theme(
+    strip.text= element_text(size = 15)
+    )
+pname <- "study2_bias_woRandInit.pdf"
+save_fig(pname, width = 14, height = 7)
+
+# RMSE
+early.tmp %>% 
+  plot_early_bias_RMSE("RMSE", "RMSE", 0) +
+  theme(
+    strip.text= element_text(size = 15)
+    )
+pname <- "study2_RMSE_woRandInit.pdf"
+save_fig(pname, width = 14, height = 7)
+
+# rRMSE
+early.tmp %>% 
+  # Preprocess data for relative RMSE plot
   group_by(phi, utility, early_stop) %>%
   mutate(relative_RMSE = RMSE / RMSE[method == "Bisection"],
          early_stop = as.factor(early_stop)) %>% 
   filter(method != "Bisection") %>% 
+  # main plot
   plot_early_bias_RMSE("relative_RMSE", "Relative RMSE to Biscetion", 1) +
-  labs(y = "Relative RMSE")
+  labs(y = "Relative RMSE") +
+  theme(
+    strip.text= element_text(size = 15)
+    )
+pname <- "study2_relativeRMSE_woRandInit.pdf"
+save_fig(pname, width = 14, height = 7)
 ```
 
-```{r, fig.height=20, fig.width=16}
-p <- p.bias / p.RMSE /p.rRMSE  +
+### combined plot
+
+```{r combined, eval=FALSE, fig.height=13, fig.width=24, include=FALSE}
+p <- p.bias / p.RMSE  +
   plot_annotation(
     title = 'Study 2: Fixed Number of Iterations',
-    theme = theme(plot.title = element_text(size = 32, hjust = .5))) +
+    theme = theme(plot.title = element_text(size = 28, hjust = .5))) +
   plot_layout(guides = 'collect') & 
   theme(legend.position='bottom',
-        legend.text = element_text(size = 28),
-        legend.title = element_text(size = 28),
-        strip.text= element_text(size = 20),
+        legend.text = element_text(size = 20),
+        legend.title = element_text(size = 24),
+        strip.text= element_text(size = 15),
+        axis.text.x = element_text(size = 15,hjust = .5),
         axis.title.x = element_text(size = 20)
         )
 
-pname <- "study2_biasRMSE.pdf"
-p
-save_fig(pname, width = 16, height = 20)
+ggsave(file.path(pic_path, "study2_biasRMSE_ABonly.png"),
+       units = "in", width = 24, height = 13)
+
+# pname <- "study2_biasRMSE.pdf"
+# p
+# save_fig(pname, width = 24, height = 13)
 ```
 
+combined 2
+```{r, fig.height=13, fig.width=13}
+p.bias1 <- early.bias_RMSE %>% 
+  filter(method %in% c("Bisection" , "MOBS", "Bisection-Slider", "Bisection-ASA")) %>%
+  plot_early_bias_RMSE("bias", "Bias", 0) +
+  ggtitle("Bisection-based Methods") +
+  theme(title = element_text(size = 16))
+p.bias2 <- early.bias_RMSE %>% 
+  filter(!method %in% c("Bisection" , "MOBS", "Bisection-Slider", "Bisection-ASA")) %>%
+  plot_early_bias_RMSE("bias", "Bias", 0) +
+  ggtitle("Non-bisection Methods")
 
+p.bias1 / p.bias2  +
+  plot_annotation(
+    title = 'Study 2: Fixed Number of Iterations',
+    theme = theme(plot.title = element_text(size = 28, hjust = .5))) +
+  plot_layout(guides = 'collect',
+              axes = 'collect_x')
+
+
+```
 
 ## Loss Aversion
 
@@ -513,7 +471,7 @@ trueLA_df <- trueLA_df %>%
   rename(true_KT_classification = "KT_classification")
 ```
 
-#### Compute LA coef from simulation data
+### Compute LA coef from simulation data
 
 ```{r LA2}
 file_path <- file.path(dir_name, "Study2_LA_df.RDS")
@@ -588,55 +546,73 @@ LA_result <- LA_result %>%
 ### 95% CI
 
 ```{r include=FALSE}
-custom_shapes <- c(24, 24, rep(21,4), 25,25, 22, 22)
+custom_shapes <- c(rep(21, 3), 24, 24, 25,25, 22, 22, 21)
 names(custom_shapes) <- method_levels
 ```
 
 
-```{r fig.height=10, fig.width=11}
-LA_result %>%
-  filter(is.finite(LA_est) & early_stop == 10 & LA_type != "KT_reg") %>%
-  mutate(early_stop = factor(as.numeric(early_stop))) %>% 
-  group_by(phi, method, LA_type, early_stop) %>% 
-  ggplot() +
-  geom_vline(
-    aes(xintercept = true_LA_est),
-    lty=2, color = "grey30", linewidth =1.05
+```{r funcLA}
+##
+plot_LA_estimates <- function(data, subset_filter) {
+  data %>%
+    filter({{ subset_filter }},
+           is.finite(LA_est),
+           early_stop == 10,
+           LA_type != "KT_reg") %>%
+    mutate(early_stop = factor(as.numeric(early_stop))) %>%
+    group_by(phi, method, LA_type, early_stop) %>%
+    ggplot() +
+    geom_vline(
+      aes(xintercept = true_LA_est),
+      lty = 2, color = "grey30", linewidth = 1.05
     ) +
-  stat_summary(
-    aes(x = LA_est, y = method, color = method),
-    geom = "errorbar",
-    position = position_dodge(0.6),
-    fun.min = \(x) quantile(x, 0.025, na.rm = TRUE),
-    fun.max = \(x) quantile(x, 0.975, na.rm = TRUE),
-    linewidth = 1.2, width = 0.5
-  ) +
-  stat_summary(
-    aes(x = LA_est, y = method, fill = method, shape = method, color= method),
-    position = position_dodge(0.6),
-    fun = \(x) mean(x, na.rm = TRUE),
-    geom = "point",
-    size = 3.0,
-  ) +
-  facet_grid(phi ~ LA_type,
-             # labeller = "label_both"
-             scales = "free"
-            ) +
-  scale_x_continuous(
-    transform = scales::pseudo_log_trans(base = 10),
-    breaks = c(-20, -10,-5, 0, 1, 5, 10, 20,40)
-  ) +
-  scale_shape_manual(values = custom_shapes) +  # Custom shape mapping
-  labs(x = "Loss Aversion Coefficient",
-   y = "Methods",
-   title = "Loss Aversion Coefficients Estimates (Iteration = 10)"
-   ) +
-  theme(
-   panel.spacing.x = grid::unit(1, "lines"),    # Adjusts horizontal spacing
-    legend.title = element_blank(),
-    legend.text = element_text(size = 14),
+    stat_summary(
+      aes(x = LA_est, y = method, color = method),
+      geom = "errorbar",
+      position = position_dodge(0.6),
+      fun.min = \(x) quantile(x, 0.025, na.rm = TRUE),
+      fun.max = \(x) quantile(x, 0.975, na.rm = TRUE),
+      linewidth = 1.2, width = 0.5
+    ) +
+    stat_summary(
+      aes(x = LA_est, y = method, fill = method, shape = method, color = method),
+      position = position_dodge(0.6),
+      fun = \(x) mean(x, na.rm = TRUE),
+      geom = "point",
+      size = 3.0
+    ) +
+    facet_grid(phi ~ LA_type, scales = "free") +
+    scale_x_continuous(
+      transform = scales::pseudo_log_trans(base = 10),
+      breaks = c(-20, -10, -5, 0, 1, 5, 10, 20, 40)
+    ) +
+    scale_shape_manual(values = custom_shapes) +   # Custom shape mapping
+    labs(
+      x = "Loss Aversion Coefficient",
+      y = "Methods",
+      title = "Loss Aversion Coefficients Estimates (Iteration = 10)"
+    ) +
+    theme(
+      panel.spacing.x = grid::unit(1, "lines"),     # Adjusts horizontal spacing
+      legend.title = element_blank(),
+      legend.text = element_text(size = 14)
     )
+}
+```
 
+
+```{r fig.height=9, fig.width=10}
+# filtered
+LA_result %>%
+  plot_LA_estimates(!grepl("randInit$", method))
+pname <- "study2_LA_Summary_iter10woRandInit.pdf"
+save_fig(pname, width = 10, height = 9)
+
+LA_result %>%
+  plot_LA_estimates() +
+  labs(
+    title = "Loss Aversion Coefficients Estimates (Iteration = 10, All Methods)"
+  )
 pname <- "study2_LA_Summary_iter10.pdf"
 save_fig(pname, width = 11, height = 9)
 ```
@@ -646,6 +622,7 @@ save_fig(pname, width = 11, height = 9)
 ```{r}
 LA_summ <- LA_result %>% 
   filter(is.finite(LA_est)) %>%  
+  # filter(!grepl("randInit$", method)) %>%
   group_by(lambda, phi, method, LA_type, early_stop) %>% 
   summarise(
     bias = mean((LA_est - true_LA_est), na.rm = TRUE),
@@ -657,33 +634,54 @@ LA_summ <- LA_result %>%
   ungroup()
 ```
 
-
-```{r, fig.height=9, fig.width=10}
-LA_summ  %>% 
-  filter(is.finite(bias) & early_stop == 10 & LA_type != "KT_reg") %>%
-  mutate(early_stop = as.factor(early_stop)) %>%
-  ggplot(aes(x = method)) +
-  geom_hline(yintercept = 0, color = "grey30", lty = 2, alpha = 0.8) +
-  geom_point(aes(y = bias, fill=method, color = method, shape = method),
-             position = position_dodge(width = 0.4),
-             size = 3.0) +
-  facet_grid(rows = vars(phi),
-             cols = vars(LA_type),
-             scales = "free_y"
-             ) +
-  scale_shape_manual(values = custom_shapes) +  # Custom shape mapping
-  labs(x = "Method",
-       y = "Bias",
-       title = "Loss Aversion Coefficients: Bias (Iteration = 10)")+
-  theme(
-    legend.title = element_blank(),
-    legend.text = element_text(size = 14),
-    axis.text.x = element_text(size = 11, angle = 90, vjust = .55),
-    strip.text= element_text(size = 13),
+```{r plot_LA}
+plot_LA <- function(data, var_y, subset_filter) {
+  y_label <- rlang::as_label(rlang::enquo(var_y)) %>%   # Convert to string
+    stringr::str_to_sentence()
+  
+  data %>%
+    filter({{ subset_filter }},
+           is.finite({{ var_y }}),
+           early_stop == 10,
+           LA_type != "KT_reg") %>%
+    mutate(early_stop = as.factor(early_stop)) %>%
+    ggplot(aes(x = method)) +
+    geom_hline(yintercept = 0, color = "grey30", lty = 2, alpha = 0.8) +
+    geom_point(
+      aes(y = {{ var_y }}, fill = method, color = method, shape = method),
+      position = position_dodge(width = 0.4),
+      size = 3.0
+    ) +
+    facet_grid(
+      rows = vars(phi),
+      cols = vars(LA_type),
+      scales = "free_y"
+    ) +
+    scale_shape_manual(values = custom_shapes) +
+    labs(
+      x = "Method",
+      y = y_label,
+      title = glue("Loss Aversion Coefficients: {y_label} (Iteration = 10)")
+    ) +
+    theme(
+      legend.title = element_blank(),
+      legend.text = element_text(size = 14),
+      axis.text.x = element_text(size = 11, angle = 90, vjust = 0.55),
+      strip.text = element_text(size = 13)
     )
+}
+```
 
+```{r, fig.height=9, fig.width=9}
+LA_summ %>% 
+  plot_LA(bias, !grepl("randInit$", method))
+pname <- "study2_LA_bias_iter10woRandInit.pdf"
+save_fig(pname, width = 9, height = 9)
+
+LA_summ %>% 
+  plot_LA(bias)
 pname <- "study2_LA_bias_iter10.pdf"
-save_fig(pname, width = 10, height = 9) # width = 10 may be better
+save_fig(pname, width = 10, height = 9)
 ```
 
 The cell below shows alternative visualization:
@@ -742,8 +740,8 @@ combined_plot
 
 #### RMSE
 
-
 ```{r, rows.print=10}
+# simply shows the data table
 LA_summ %>% 
   filter(early_stop==10) %>% 
   select(!c(lambda, bias)) %>% 
@@ -751,39 +749,22 @@ LA_summ %>%
 ```
 
 ```{r, fig.height=9, fig.width=10}
-LA_summ  %>% 
-  filter(is.finite(RMSE) & early_stop == 10 & LA_type != "KT_reg") %>%
-  mutate(early_stop = as.factor(early_stop)) %>%
-  ggplot(aes(x = method)) +
-  geom_hline(yintercept = 0, color = "grey30", lty = 2, alpha = 0.8) +
-  geom_point(aes(y = RMSE, 
-                 fill = method,
-                 color = method,
-                 shape = method
-                 ),
-             position = position_dodge(width = 0.4),
-             size = 3.0) +
-  facet_grid(rows = vars(phi),
-             cols = vars(LA_type),
-             scales = "free_y"
-             ) +
-  scale_shape_manual(values = custom_shapes) +  # Custom shape mapping
-  # scale_y_continuous(transform = "log10",
-  #                    labels =
-  #                      function(x) parse(text = gsub("e", " %*% 10^", as.numeric(format(x, scientific = TRUE))))
-  #                    )+
-  labs(x = "Method",
-       y = "RMSE",
-       title = "Loss Aversion Coefficients: RMSE (Iteration = 10)")+
-  theme(
-    legend.title = element_blank(),
-    legend.text = element_text(size = 14),
-    axis.text.x = element_text(size = 11, angle = 90, vjust = .55),
-    strip.text= element_text(size = 13),
-    )
+LA_summ %>% 
+  plot_LA(RMSE, !grepl("randInit$", method)) +
+  labs(
+    y = 'RMSE',
+    title = "Loss Aversion Coefficients: RMSE (Iteration = 10)"
+  )
+pname <- "study2_LA_RMSE_iter10woRandInit.pdf"
+save_fig(pname, width = 9, height = 9)
 
+LA_summ %>% 
+  plot_LA(RMSE) +
+  labs(
+    y = 'RMSE',
+    title = "Loss Aversion Coefficients: RMSE (Iteration = 10)"
+  )
 pname <- "study2_LA_RMSE_iter10.pdf"
-
 save_fig(pname, width = 10, height = 9)
 ```
 

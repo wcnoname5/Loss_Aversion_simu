@@ -81,6 +81,20 @@ mix_param <- list(
 ) 
 phi_vec <- c(.phi*10, .phi, .phi*0.1)
 names(phi_vec) <- c("large", "medium", "small")
+
+# methods
+
+method_levels <- 
+  c("Bisection", "Bisection-Slider", "MOBS", "ASA","SimpBisection", "PEST")
+utility_method_levels <- 
+          c(
+            "Bisection","Bisection_fixbnd",
+            "Bisection-Slider", "Bisection-Slider_fixbnd",
+            "MOBS", "MOBS_fixbnd",
+             "ASA", "ASA_randInit",
+            "SimpBisection", "SimpBisection_randInit",
+            "PEST", "PEST_randInit")
+
 ```
 
 ## Directories
@@ -91,7 +105,6 @@ pic_path <- "./figs"
 ```
 
 # Simulation 1 (new version)
-
 
 ```{r bound2}
 file_name <- "Study1_df.RDS"
@@ -146,10 +159,7 @@ true_df <- bound_df %>%
   mutate(utility = utility |>
            str_remove("^truev_")|>
            factor(labels = -6:6,
-                  levels =
-                    c(paste0("x", 6:1, "neg"),
-                      "x0",
-                      paste0("x", 1:6, "pos")))
+                  levels = gen_util_levels())
          ) %>% 
   select(!data)
 
@@ -162,26 +172,18 @@ cleaned_df <- bound_df %>%
 ```
 
 
-
 ## Utility Curve Plots
 
 顏色線段代表 95% 的觀測值分布範圍長度。黑色虛線為實際數值
 
+
+
 ```{r, fig.height=7, fig.width=14}
 cleaned_df %>% 
-  filter(lambda == 2.25 & phi != "small") %>%
+  filter(lambda == 2.25 & phi != "small" ) %>%
   mutate(
     method =
-      factor(
-        method,
-        levels =
-          c("ASA", "ASA_randInit",
-            "Bisection","Bisection_fixbnd",
-            "Bisection-Slider", "Bisection-Slider_fixbnd",
-            "MOBS", "MOBS_fixbnd",
-            "SimpBisection", "SimpBisection_randInit",
-            "PEST", "PEST_randInit")
-      )
+      factor(method, levels = utility_method_levels)
   ) %>%
   group_by(phi) %>% 
   ggplot(aes(y = utility)) +
@@ -210,7 +212,7 @@ cleaned_df %>%
     linewidth = 1.1, size = 0.6, alpha=.8
   ) +
   labs(x = "Elicited x ",
-       y = "Values",
+       y = "V(X)",
        title = "Value Curve",
        color = "phi") +
   facet_wrap(~ method, dir="v", ncol=6, nrow=2) +
@@ -237,9 +239,7 @@ df.bias_RMSE <- cleaned_df %>%
     method = 
       str_replace(method, "_(randInit|fixbnd)$", "") |>
       factor(
-        levels = 
-          c("ASA", "Bisection", "Bisection-Slider", 
-            "MOBS", "SimpBisection", "PEST")
+        levels = method_levels
       )
   ) %>% 
   group_by(phi, method, boundary_type, utility, lambda) %>% 
@@ -285,13 +285,13 @@ p.bias <- df.bias_RMSE %>%
     labels = c("fix_bnd" = "Boundary Width = 5000",
                "equal_exp" = "Equal Expectation",
                "rand_init" = "Random Initial"),
-    name = "Variants") +
+    name = "Variant") +
   scale_shape_manual(
     values = c("fix_bnd" = 16, "equal_exp" = 17, "rand_init" = 15),
     labels = c("fix_bnd" = "Boundary Width = 5000",
                "equal_exp" = "Equal Expectation",
                "rand_init" = "Random Initial"),
-    name = "Variants") +
+    name = "Variant") +
   labs(x = expression(x["i"]),
        y = "Bias",
        title = "Bias")+
@@ -398,6 +398,12 @@ rm(p2)
 
 ### RMSE
 
+```{r}
+df.bias_RMSE %>% 
+  filter(lambda == 2.25, method =="ASA")
+```
+
+
 ```{r RMSE_bnd, fig.height=7, fig.width=13}
 p.RMSE <- df.bias_RMSE %>% 
   filter(lambda == 2.25) %>% 
@@ -427,13 +433,13 @@ p.RMSE <- df.bias_RMSE %>%
     labels = c("fix_bnd" = "Boundary Width = 5000",
                "equal_exp" = "Equal Expectation",
                "rand_init" = "Random Initial"),
-    name = "Variants") +
+    name = "Variant") +
   scale_shape_manual(
     values = c("fix_bnd" = 16, "equal_exp" = 17, "rand_init" = 15),
     labels = c("fix_bnd" = "Boundary Width = 5000",
                "equal_exp" = "Equal Expectation",
                "rand_init" = "Random Initial"),
-    name = "Variants") +
+    name = "Variant") +
   labs(x = expression(x["i"]),
        y = "RMSE",
        title = "RMSE")+
@@ -475,34 +481,446 @@ save_fig(pname, width = 16, height = 16)
 len_df <- read_rds(fname) %>% 
   select(alpha:Nsim, ends_with("len")) %>%
   mutate(
-    method = str_replace(method_type, "_(randInit|fixbnd)$", ""),
-    variant = ifelse(
-        grepl(".*_fixbnd$", method_type),
-        "fix_bnd",
-        ifelse(
-          grepl(".*_randInit$", method_type),
-          "rand_init",
-          "equal_exp")
+    # method = str_replace(method_type, "_(randInit|fixbnd)$", ""),
+    method = gsub("Bisection_Slider","Bisection-Slider", method_type) |> 
+      factor(levels = utility_method_levels),
+    scheme = 
+      case_when(
+        grepl(".*_fixbnd$", method_type) ~ "Fixed Boundary Width",
+        grepl(".*_randInit$", method_type) ~ "Random Initial Points",
+        .default = "Equal-Expectation"
         ),
     .after = phi,
     .keep = "unused"
   )
 
 len_df %>% 
-  group_by(phi, lambda,  method, variant) %>% 
+  # group_by(phi, lambda,  method, scheme) %>% 
+  group_by(phi, lambda,  method) %>% 
   filter(lambda ==2.25) %>% 
   mutate(
     mean_each_step = rowMeans(across(ends_with("len"))),
     .keep = "unused"
   ) %>%
   summarise(
-    mean_step = mean(mean_each_step) |> round(),
+    Mean_Iteration_Number = mean(mean_each_step) |> round(),
     .groups = "drop"
   ) %>% 
-  select(!lambda)
-  # write_csv(
-  #   file = file.path(pic_path, "step.csv")
-  # )
+  select(!lambda) %>%
+  group_by(phi) %>%
+  # arrange(desc(Mean_Iteration_Number), .by_group = TRUE)
+  arrange(method, .by_group = TRUE) %>% 
+  write_csv(
+    file = file.path(pic_path, "step.csv")
+  )
+
+```
+
+# Inspect alternative determination rule for ASA
+
+Since step size < 5 may not be appropriate for ASA.
+
+The m-reversal-out-of-k rule is applied.
+
+```{r}
+ASA_df <- read_rds(fname) %>% 
+  rename(method = method_type) %>% 
+  filter(grepl("^ASA.*", method)) %>% 
+  select(!c(L, G2, L2, L_est:x6neg_len)) %>%
+  pivot_longer(
+    cols = matches("x[1-9](pos|neg)"),
+    names_to = "utility",
+    values_to = "seq",
+    ) %>% 
+  mutate(
+    utility = factor(utility,
+                     labels = -6:6,
+       levels = gen_util_levels())
+  )
+```
+
+
+```{r eval=FALSE, include=FALSE}
+max_len <- ASA_df %>% 
+  summarise(max_len = max(map_int(seq, length))) %>% 
+  pull(max_len)
+
+# Pad each sequence with NA to the same length
+ASA_df <- ASA_df %>%
+  mutate(seq = map(seq, ~{ length(.x) <- max_len; .x })) %>% 
+  unnest_longer(seq, indices_to = "iter")
+
+
+
+# Plot each sequence as a separate line
+ASA_df %>%
+  filter(phi == "medium", lambda == 2.25, utility == "1", method == "ASA") %>%
+  mutate(seq = map(seq, ~{ length(.x) <- max_len; .x })) %>% 
+  slice_sample(n=20) %>% 
+  unnest_longer(seq, indices_to = "iter") %>% 
+  ggplot(
+    aes(x = iter, y = seq, group = Nsim, color = factor(Nsim))) +
+  geom_line(alpha = 0.8) +
+  # geom_point() +
+  geom_hline(aes(yintercept = true_value + c(100,0, -100)),
+             linetype = "dashed")+
+  labs(
+    title = "Sequences as Line Plots",
+    x = "Iteration",
+    y = "Value"
+  ) +
+  guides(color = "none")
+  # theme_minimal()
+
+
+
+
+```
+
+```{r}
+find_subvector <- function(vec, m, k, start.from = 1) {
+  # find until a subarray with length of k contains more than m reversals
+  n <- length(vec)
+  
+  if (k > (n - start.from + 1)) {
+    stop(
+      sprintf("Error: window size k (%d) is greater than the length of vec (%d)", k, n))
+  } else if (m > k){
+    stop(
+      sprintf("Error: window size k (%d) is greater than target reversal times m=(%d)", k, m))
+    
+  }
+
+  for (i in start.from:(n - k + 1)) {
+    sub_vec <- vec[i:(i + k - 1)]
+    if (length(unique(sub_vec)) >= m) {
+      return(list(
+        value = sub_vec[k],
+        index = i + k - 1
+      ))
+    } else if (anyNA(sub_vec)){
+      # if NA found, return current idx
+        return(list(
+        value = sub_vec[k-1],
+        index = i + k - 2
+      ))
+    }
+  }
+
+  # if no sub-sequence satisfy the condition, return last element
+  return(list(
+        value = sub_vec[n],
+        index = n
+      ))  # No match found
+}
+sliced_ASA <- ASA_df %>%
+  filter(lambda == 2.25, grepl("^ASA.*", method)) %>%
+  mutate(step = map(seq, diff),
+         # m-reversal-out-of-k rule
+         early = map(step, \(x) find_subvector(x, 6, 8)),
+         .after = Nsim
+         ) %>%
+  # unnest early into `value`, `index`
+  unnest_wider(early) %>% 
+  mutate(
+    sliced_seq = map2(seq, index,\(x, idx) x[1:idx]),
+    sliced_N_iter = map_int(sliced_seq, length),
+    final_step_size = abs(value),
+    # extract final est
+    x_value = map_int(sliced_seq, \(x) x[length(x)]),
+    .keep = 'unused'
+  ) %>% 
+  left_join(true_df, by = join_by(alpha, beta, lambda, utility))
+```
+
+```{r}
+sliced_ASA %>%
+  group_by(phi, method) %>% 
+  summarise(mean_iteration_number = mean(sliced_N_iter))
+```
+
+```{r fig.height=6, fig.width=12}
+sliced_ASA %>%
+  group_by(phi, method, utility) %>% 
+  ggplot() + 
+  # geom_violin(
+  #   aes(x = sliced_N_iter,
+  #       y= utility,
+  #       fill = method,
+  #       ),
+  #   draw_quantiles = c(.25, .5, .75)) + 
+  geom_boxplot(
+    aes(x = sliced_N_iter,
+        y= utility,
+        fill = method,
+        ),
+    draw_quantiles = c(.25, .5, .75)) + 
+  # geom_histogram(aes(x = sliced_N_iter, fill = method)) +
+  facet_grid(
+    . ~ phi
+  ) +
+  scale_x_continuous(
+    breaks = seq(0,200, 15)
+  )
+    
+```
+
+## Bias & RMSE
+
+```{r}
+sliced_ASA.biasRMSE <- sliced_ASA %>% 
+  group_by(phi, method, utility, lambda) %>% 
+  summarise(
+   bias = mean(x_value - true_value)|> round(),
+   RMSE = 
+     (x_value - true_value)^2 |> 
+     mean() |>
+     sqrt() |>
+     round(),
+   .groups = "drop"
+   ) %>% 
+  mutate(
+    boundary_type = case_when(
+      grepl(".*_fixbnd$", method) ~ "fix_bnd",
+      grepl(".*_randInit$", method) ~ "rand_init",
+      TRUE ~ "equal_exp"
+    ),
+    method = "ASA_sliced",
+    .after = method
+  )
+# add original methods
+sliced_ASA.biasRMSE <- sliced_ASA.biasRMSE %>% 
+  add_row(
+    df.bias_RMSE %>%
+      mutate(
+        method = as.character(method)
+      ) %>% 
+      select(any_of(names(sliced_ASA.biasRMSE))) %>% 
+      filter(lambda==2.25)
+  )
+```
+
+```{r}
+sliced_ASA.biasRMSE %>% 
+  filter(!grepl("^(Bisection|MOBS)", method)) %>% 
+  ggplot(aes(x = utility)) +
+  geom_line(aes(
+    x = utility,
+    y = bias,
+    color = boundary_type,
+    group = boundary_type),
+    linewidth = 1.2,
+    alpha = 0.8
+    ) +
+  geom_hline(yintercept = 0, color = "grey30", lty=2, alpha=0.8)+
+  geom_point(
+    aes(
+      y = bias,
+      color = boundary_type,
+      shape = boundary_type),
+    size = 3) +
+  facet_grid(rows = vars(phi),
+             cols = vars(method),
+             # scales = "free_y"
+             ) +
+  scale_x_discrete(labels = latex_labels) +
+  scale_color_discrete(
+    # values = c("fix_bnd" = "cyan4", "equal_exp" = "orange2"),
+    labels = c("fix_bnd" = "Boundary Width = 5000",
+               "equal_exp" = "Equal Expectation",
+               "rand_init" = "Random Initial"),
+    name = "Variant") +
+  scale_shape_manual(
+    values = c("fix_bnd" = 16, "equal_exp" = 17, "rand_init" = 15),
+    labels = c("fix_bnd" = "Boundary Width = 5000",
+               "equal_exp" = "Equal Expectation",
+               "rand_init" = "Random Initial"),
+    name = "Variant") +
+  labs(x = expression(x["i"]),
+       y = "Bias",
+       title = "Bias")+
+  theme(
+    strip.text= element_text(size = 15)
+    )
+```
+```{r}
+sliced_ASA.biasRMSE %>% 
+  filter(!grepl("^(Bisection|MOBS)", method)) %>% 
+  ggplot(aes(x = utility)) +
+  geom_line(aes(
+    x = utility,
+    y = RMSE,
+    color = boundary_type,
+    group = boundary_type),
+    linewidth = 1.2,
+    alpha = 0.8
+    ) +
+  geom_hline(yintercept = 0, color = "grey30", lty=2, alpha=0.8)+
+  geom_point(
+    aes(
+      y = RMSE,
+      color = boundary_type,
+      shape = boundary_type),
+    size = 3) +
+  facet_grid(rows = vars(phi),
+             cols = vars(method),
+             scales = "free_y"
+             ) +
+  scale_x_discrete(labels = latex_labels) +
+  scale_color_discrete(
+    # values = c("fix_bnd" = "cyan4", "equal_exp" = "orange2"),
+    labels = c("fix_bnd" = "Boundary Width = 5000",
+               "equal_exp" = "Equal Expectation",
+               "rand_init" = "Random Initial"),
+    name = "Variant") +
+  scale_shape_manual(
+    values = c("fix_bnd" = 16, "equal_exp" = 17, "rand_init" = 15),
+    labels = c("fix_bnd" = "Boundary Width = 5000",
+               "equal_exp" = "Equal Expectation",
+               "rand_init" = "Random Initial"),
+    name = "Variant") +
+  labs(x = expression(x["i"]),
+       y = "RMSE",
+       title = "RMSE")+
+  theme(
+    strip.text= element_text(size = 15)
+    )
+```
+
+
+# Viz. for presentation
+
+## Utility
+
+```{r fig.height=5, fig.width=6}
+cleaned_df %>% 
+  filter(lambda == 2.25 & phi != "small" & method %in% c("ASA", "Bisection")) %>%
+  group_by(phi) %>% 
+  ggplot(aes(y = utility)) +
+  geom_hline(
+    yintercept = 
+      as.numeric(
+        factor("x0", levels = gen_util_levels()
+               )),
+    color = "red2",
+    linetype = "dashed", alpha = 0.8) +
+  # True utility curve
+  geom_line(
+    aes(y = utility, x = true_value, group = 1),
+    color = "black", linetype = "3331") +
+  geom_point(
+    aes(y = utility, x = true_value, group = 1),
+    color = "black", pch = 1, size =2.5) +
+  # 95% range
+  stat_summary(
+    aes(y = utility, x = x_value, color = phi, shape = phi),
+    geom = "pointrange",
+    fun = \(x) mean(x, na.rm = TRUE),
+    fun.min = \(x) quantile(x, .025, na.rm = TRUE),
+    fun.max = \(x) quantile(x, .975, na.rm = TRUE),
+    position = position_dodge(width = 0.9),
+    linewidth = 1.1, size = 0.6, alpha=.8
+  ) +
+  labs(x = "Elicited x ",
+       y = "V(x)",
+       title = "Value Curve",
+       color = "phi") +
+  facet_wrap(~ method, dir="v", ncol=2, nrow=1) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 0.6, vjust=0.6),
+    strip.text= element_text(size = 15),
+    )
+
+ggsave(file.path(pic_path, "study1_utility_ABonly.png"),
+       units = "in", width = 6, height = 5)
+```
+
+## Bias RMSE
+
+```{r RMSE_bnd, fig.height=7, fig.width=13}
+p.bias <- df.bias_RMSE %>% 
+  filter(lambda == 2.25 & method %in% c("ASA", "Bisection") & boundary_type == 'equal_exp') %>% 
+  ggplot(aes(x = utility)) +
+  geom_line(aes(
+    x = utility,
+    y = bias,
+    # color = boundary_type,
+    group = boundary_type
+    ),
+    color = 'darkorange2',
+    linewidth = 1.2,
+    alpha = 0.8
+    ) +
+  geom_hline(yintercept = c(0), color = "grey30", lty=2, alpha=0.8, linewidth=1.2)+
+  geom_point(
+    aes(
+      y = bias,
+      # color = boundary_type,
+      # shape = boundary_type
+      ),
+    size = 3) +
+  facet_grid(rows = vars(phi),
+             cols = vars(method),
+             # scales = "free_y"
+             ) +
+  scale_x_discrete(labels = latex_labels) +
+  labs(x = expression(x["i"]),
+       y = "Bias",
+       title = "Bias")+
+  theme(
+    strip.text= element_text(size = 15)
+    )
+
+p.RMSE <- df.bias_RMSE %>% 
+  filter(lambda == 2.25 & method %in% c("ASA", "Bisection") & boundary_type == 'equal_exp') %>% 
+  ggplot(aes(x = utility)) +
+  geom_line(aes(
+    x = utility,
+    y = RMSE,
+    # color = boundary_type,
+    group = boundary_type
+    ),
+    color = 'darkcyan',
+    linewidth = 1.2,
+    alpha = 0.8
+    ) +
+  geom_hline(yintercept = c(0), color = "grey30", lty=2, alpha=0.8, linewidth=1.2)+
+  geom_point(
+    aes(
+      y = RMSE,
+      # color = boundary_type,
+      # shape = boundary_type
+      ),
+    size = 3) +
+  facet_grid(rows = vars(phi),
+             cols = vars(method),
+             # scales = "free_y"
+             ) +
+  scale_x_discrete(labels = latex_labels) +
+
+  labs(x = expression(x["i"]),
+       y = "RMSE",
+       title = "RMSE")+
+  theme(
+    strip.text= element_text(size = 15)
+    )
+
+p <- p.bias + p.RMSE +
+  plot_annotation(
+    title = 'Study1: Iterates Until Step Size < 5',
+    theme = theme(plot.title = element_text(size = 32, hjust = .5))) +
+  plot_layout(guides = 'collect') & 
+  theme(legend.position='bottom',
+        legend.text = element_text(size = 24),
+        legend.title = element_text(size = 26),
+        strip.text= element_text(size = 20),
+        axis.text.x = element_text(size = 16),
+        axis.title.x = element_text(size = 20),
+        )
+
+ggsave(file.path(pic_path, "study1_biasRMSE.png"),
+       plot = p,
+       units = "in", width = 14, height = 7)
 
 ```
 
