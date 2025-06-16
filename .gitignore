@@ -11,6 +11,7 @@ figs/
 ASA_files/
 BL2023_data
 */*.png
+simulated_data/
 simulation_Rmds/Study2_additional.Rmd
 simulation_Rmds/old_files/Study2_latex_old.Rmd
 simulation_Rmds/old_files/Study2_latex_TEST.Rmd

@@ -1,0 +1,904 @@
+---
+title: "Simulation Study-2"
+author: "Wei-Chen Chang"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+     toc: true
+     toc_depth: 2
+     toc_float: true
+     code-link: true
+     code-tools: true
+     code_folding: show
+     code_download: true
+     code-overflow: "scroll"
+     self-contained: true
+     number_sections: false
+     df_print: paged
+bibliography: "CPT_LA_new.bib"  
+csl: "apa.csl"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	fig.align = "center",
+	warning = FALSE,
+	rows.print=11,
+	paged.print=TRUE
+)
+```
+
+```{r lib, message=FALSE, include=FALSE}
+library(tidyverse)
+library(DT)
+library(glue)
+library(magrittr)
+library(patchwork)
+library(kableExtra)
+# import functions
+source(here::here("functions", "player_and_lotteries.R"))
+source(here::here("functions", "new_game.R"))
+source(here::here("functions", "analysis_functions.R"))
+# ggplot settings
+theme_set({
+  theme_bw()+    
+  theme(
+    legend.position = "bottom",
+    legend.title = element_text(size = 17),
+    legend.text = element_text(size = 17),
+    axis.title = element_text(size = 16),
+    axis.text.x = element_text(vjust = 0.5, hjust = 0.5),
+    axis.text = element_text(size = 13),
+    strip.text= element_text(size = 14),
+    title = element_text(size = 18))
+})
+```
+
+
+# Introduction
+
+-   回去翻過去 EDP 的實驗資料分析有個奇怪的地方，就是發現不少違反 monotonicity 的受試者
+
+    -  bisection method 決定boundary的方法之一就是採用monotonicity，因此不應該發生這件事。
+    
+-   重看當時的實驗程式，發現當時的做法和A學者所提Bisection不同，並沒有紀錄upper/lower bound再取中點，而是先用equal expectation決定初始值，直接以初始值的絕對值* 1/2 當作一開始的step size，之後的step size就一直折半下去。
+
+    -  姑且先稱作simplified Bisection (不用modified 是怕跟MOBS搞混)，取`Simp_Bisection`
+    
+-   EDP 當時測的樣本點比A學者2016年的多，收到 $x_8^+, x_8^-$，且 Iteration = 5。以下模擬也會以這部分為基準進行討論。
+
+
+## Simulation Overview
+
+-   EDP 裡面 simplified Bisection用的也是固定Iteration = 5的設定，因此根據Study 2的設定，訂定Iteration = 5, 10的情況下進行模擬。比較Study 2 中和其他方法間的差異。
+
+    -   參數設定一樣，固定value function，變動$\phi$
+
+-   因為EDP樣本點較多，模擬也有做到 $x_8^+, x_8^-$額外獨立分析
+
+    -   多做 $\lambda=0.5, 1, 2.25$三個 levels 的模擬比較其 biasedness。
+    
+    -   分析違反 monotonicity 的比例
+
+# Simulation Setting Codes
+
+```{r params}
+# Simulation Parameters
+Nsim <-  1000L
+.phi <-  0.0367 # err = 1e-8, 0.027513126 is err = 1e-6
+param <-  list("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5)
+exp_param <- list(
+  init_values =
+    list("G"= 2000L,
+         "g"=300L, "l"=-300L),
+  random_init = FALSE,
+  fix_bnd_width = FALSE,
+  n_est = 3L + (6*2L),
+  min_step = 0L,
+  step_size = 320L
+)
+mix_param <- list(
+  est_method = "ASA", # changed method type: ASA, UD
+  start_crit = 500L, # Bisection 3 Times
+  start_step = 100L, # ASA_c = 2*100
+  stop_rev_times = 3L,
+  UseMidrunEst = TRUE 
+) 
+phi_vec <-  c(.phi*10, .phi, .phi*0.1)
+phi_names <- c("large", "medium","small")
+
+# methods
+method_levels <- c(
+  as.vector(mapply(function(base, suffix) c(base, paste0(base, suffix)),
+         base = c("Bisection", "Bisection-Slider", "MOBS"),
+         suffix = "_adaptiveBnd")),
+  as.vector(mapply(function(base, suffix) c(base, paste0(base, suffix)),
+         base = c("ASA", "PEST", "SimpBisection"),
+         suffix = "_randInit")),
+  "Bisection-ASA", "Bisection-ASA_adaptiveBnd"
+  )
+
+method_labels <- (function(x) {
+  x <- gsub("_adaptiveBnd$", "\n(Adaptive Bound)", x)
+  x <- gsub("_randInit$",    "\n(Random Initial)", x)
+  x
+})(method_levels)
+```
+
+
+## Directories
+
+
+```{r dir_params}
+dir_name <- here::here("simulated_data")
+pic_path <- "./figs"
+```
+
+# Simulation 2 (new)
+
+The simulation data is stored as a `data.frame`, making it easier to process.
+
+-  加上`SimpBisection`，和其他方法比較
+
+## Read file and Preprocess
+
+```{r read_early_stop}
+file_name <- "Study2_simulation_20250619_160243.rds"
+fname <- file.path(dir_name, file_name)
+
+early_df <- 
+  readRDS(fname) %>% 
+  separate_wider_delim(
+    method_type,
+    delim = "_early",
+    names = c("method", "early_stop")
+    ) %>% 
+  select(phi, method, alpha:lambda, Nsim, any_of("early_stop"),
+         matches("^x[1-9](pos|neg)_est")) %>% 
+  rename_with(\(x) str_remove(x, "_est")) %>% 
+  add_column(x0 = 0L, .before = "x1pos")
+
+# Count the invalid points
+cat("Invalid data information")
+early_df %>%
+  group_by(method, lambda, phi, early_stop) %>%
+  summarise(
+    num_Inf = sum(rowSums(across(x1pos:x6neg, is.infinite)) > 0),
+    num_na = sum(rowSums(across(x1pos:x6neg, is.na)) > 0),
+            .groups = 'drop'
+    ) %>% 
+  filter(num_na!=0) %>%
+  print()
+
+# Add true value
+early_df <- early_df %>%
+  # Filter invalid data points
+  filter(!rowSums(across(x1pos:x6neg, is.na)) > 0) %>%
+  nest(data = !c(alpha:lambda)) %>%
+  rowwise() %>%
+  mutate(
+    truev = list(
+      find_optimal_params(
+        params = list(
+          "alpha" = alpha, "beta" = beta, "lambda" = lambda, "wp" = 0.5, "wn" = 0.5
+          ),
+        exp_params_init = exp_param$init_values,
+        x_num = exp_param$n_est)
+      )
+    ) %>%
+  ungroup() %>%
+  unnest_wider(truev, names_sep = "_") %>%
+  select(!matches("truev_(L(_2)?|G_2|lambda_KW)$")) # L, L2 G2 orlambdaKW
+
+# unnest and pivot_longer
+true_df <- early_df %>%
+  add_column(truev_x0 = 0) %>% 
+  pivot_longer(
+    cols = starts_with("truev"), 
+    names_to = "utility",
+    values_to = "true_value") %>% 
+  mutate(utility = utility |>
+           str_remove("^truev_")|>
+           factor(labels = -6:6, levels = gen_util_levels())
+         ) %>% 
+  select(!data)
+
+cleaned_df <- early_df %>%
+  select(alpha: data) %>% 
+  unnest(data) %>%
+  utility_longer() %>% 
+  left_join(true_df, by = join_by(alpha, beta, lambda, utility)) %>%
+  mutate(method = gsub("_mix", "-", method),
+         early_stop = as.numeric(early_stop)
+         )
+```
+
+
+## Bias and RMSE
+
+
+```{r}
+early.bias_RMSE <- cleaned_df %>% 
+  filter(utility != 0) %>% 
+  group_by(phi, method, utility, early_stop, lambda) %>% 
+  summarise(
+   bias = mean(x_value - true_value)|> round(),
+   RMSE = 
+     (x_value - true_value)^2 |> 
+     mean() |>
+     sqrt() |>
+     round(),
+   .groups = "drop"
+   ) %>% 
+  mutate(
+    method =
+      factor(method,
+             levels = method_levels,
+             labels = method_labels
+             ),
+    early_stop = as.factor(early_stop)
+  )
+```
+
+結果如下， simplified Bisection (`Simp_Bisection`) 的結果其實與Bisection差不多，RMSE 在gain domain下會比較大。
+
+### Plot Function 
+
+```{r}
+# Define a wrapper function for plotting
+plot_early_bias_RMSE <- function(data, y_var, title, hline_value, 
+                                 combine_first_two_rows = TRUE, 
+                                 global_var_name = NULL) {
+  
+  # Set default global variable name based on y_var if not provided
+  if (is.null(global_var_name)) {
+    global_var_name <- paste0("global_y_ranges_", y_var)
+  }
+  
+  # Calculate y-range for phi levels
+  y_ranges <- data %>%
+    group_by(phi) %>%
+    summarise(
+      y_min = min(!!sym(y_var), na.rm = TRUE),
+      y_max = max(!!sym(y_var), na.rm = TRUE),
+      .groups = 'drop'
+    )
+  
+  # Make first two phi levels have the same range (optional)
+  if (combine_first_two_rows && nrow(y_ranges) >= 2) {
+    combined_min <- min(y_ranges$y_min[1:2])
+    combined_max <- max(y_ranges$y_max[1:2])
+    y_ranges$y_min[1:2] <- combined_min
+    y_ranges$y_max[1:2] <- combined_max
+  }
+  
+  # For separate plots (when data is filtered), use global ranges from the original full dataset
+  # This ensures consistent scaling across separate plots
+  if (!exists(global_var_name, envir = .GlobalEnv)) {
+    # Store global ranges in the global environment for separate plots to use
+    assign(global_var_name, y_ranges, envir = .GlobalEnv)
+  }
+  
+  # Use global ranges if they exist (for separate plots)
+  if (exists(global_var_name, envir = .GlobalEnv)) {
+    y_ranges_to_use <- get(global_var_name, envir = .GlobalEnv)
+    # Match the phi levels present in current data with global ranges
+    y_ranges <- y_ranges %>%
+      select(phi) %>%
+      left_join(y_ranges_to_use %>% select(phi, y_min, y_max), by = "phi")
+  }
+  
+  # Add y-range info to data
+  data_with_ranges <- data %>%
+    left_join(y_ranges, by = "phi")
+  
+  ggplot(data_with_ranges, aes(x = utility)) +
+    geom_line(aes(
+      x = utility,
+      y = !!sym(y_var),
+      color = early_stop,
+      group = early_stop),
+      linewidth = 1.2,
+      alpha = 0.8
+    ) +
+    geom_hline(yintercept = hline_value, color = "grey20", lty=2, alpha=0.8) +
+    geom_point(
+      aes(
+        y = !!sym(y_var),
+        color = early_stop,
+        shape = early_stop),
+      size = 3
+    ) +
+    # Add invisible points to force consistent y-axis ranges within each row
+    geom_point(aes(y = y_min), alpha = 0, size = 0) +
+    geom_point(aes(y = y_max), alpha = 0, size = 0) +
+    facet_grid(rows = vars(phi),
+               cols = vars(method),
+               scales = "free_y"
+    ) +
+    scale_x_discrete(labels = latex_labels) +
+    scale_shape_manual(
+      values = c("5" = 16, "10" = 17)) +
+    labs(
+      x = expression(x[i]),
+      y = title,
+      color = "Iteration Number",
+      shape = "Iteration Number",
+      title = paste(title, "(Fixed Iteration)")
+    ) +
+    theme(
+      axis.text.y = element_text(size=14)
+    )
+}
+```
+
+
+### bias
+```{r rRMSE_early, fig.height=6, fig.width=24}
+p.bias <- early.bias_RMSE %>% 
+  plot_early_bias_RMSE("bias", "Bias", 0)
+
+pname <- "study2_relativeRMSE.pdf"
+save_fig(pname, width = 18, height = 6)
+
+```
+
+### relative RMSE
+
+```{r rRMSE_early, fig.height=6, fig.width=24}
+p.RMSE <- early.bias_RMSE %>% 
+  plot_early_bias_RMSE("RMSE", "RMSE", 0)
+
+pname <- "study2_relativeRMSE.pdf"
+save_fig(pname, width = 18, height = 6)
+
+```
+
+### relative RMSE
+
+```{r rRMSE_early, fig.height=6, fig.width=24}
+p.rRMSE <- early.bias_RMSE %>% 
+  group_by(phi, utility, early_stop) %>%
+  mutate(
+    relative_RMSE = RMSE / RMSE[method == "Bisection"],
+    early_stop = as.factor(early_stop)
+  ) %>% 
+  filter(method != "Bisection") %>% 
+  plot_early_bias_RMSE("relative_RMSE", "Relative RMSE to Biscetion", 1)
+
+pname <- "study2_relativeRMSE.pdf"
+save_fig(pname, width = 18, height = 6)
+
+```
+
+
+
+
+## Combined plot
+
+### Bias
+
+```{r, fig.height=13, fig.width=14}
+# First, ensure global ranges are calculated from the full dataset for bias
+# This creates the global_y_ranges_bias that both plots will use
+# combine_first_two_rows = TRUE means first two rows will have the same range
+invisible(early.bias_RMSE %>% 
+  plot_early_bias_RMSE("bias", "Bias", 0, 
+                       combine_first_two_rows = TRUE, 
+                       global_var_name = "global_y_ranges_bias"))
+
+p.bias1 <- early.bias_RMSE %>% 
+  filter(grepl("^(Bisection)|(MOBS)", method)) %>%
+  plot_early_bias_RMSE("bias", "Bias", 0, 
+                       combine_first_two_rows = TRUE, 
+                       global_var_name = "global_y_ranges_bias") +
+  ggtitle("Bisection-based Methods") +
+  theme(title = element_text(size = 16))
+
+p.bias2 <- early.bias_RMSE %>% 
+  filter(!grepl("^(Bisection)|(MOBS)", method)) %>%
+  plot_early_bias_RMSE("bias", "Bias", 0, 
+                       combine_first_two_rows = TRUE, 
+                       global_var_name = "global_y_ranges_bias") +
+  ggtitle("Non-bisection Methods and SimpBisection") +
+  theme(title = element_text(size = 16))
+
+p.bias1 / p.bias2  +
+  plot_annotation(
+    title = 'Bias in Study 2: Fixed Number of Iterations',
+    theme = theme(plot.title = element_text(size = 28, hjust = .5))) +
+  plot_layout(guides = 'collect',
+              axes = 'collect'  # This collects both x and y axes
+              )
+```
+
+```{r, fig.height=13, fig.width=14}
+# First, ensure global ranges are calculated from the full dataset for RMSE
+# This creates separate global ranges for RMSE (different from bias)
+# combine_first_two_rows = FALSE means each row will have its own optimal range
+invisible(early.bias_RMSE %>% 
+  plot_early_bias_RMSE("RMSE", "RMSE", 0, 
+                       combine_first_two_rows = FALSE, 
+                       global_var_name = "global_y_ranges_RMSE"))
+
+p.RMSE1 <- early.bias_RMSE %>% 
+  filter(grepl("^(Bisection)|(MOBS)", method)) %>%
+  plot_early_bias_RMSE("RMSE", "RMSE", 0, 
+                       combine_first_two_rows = FALSE, 
+                       global_var_name = "global_y_ranges_RMSE") +
+  ggtitle("Bisection-based Methods") +
+  theme(title = element_text(size = 16))
+
+p.RMSE2 <- early.bias_RMSE %>% 
+  filter(!grepl("^(Bisection)|(MOBS)", method)) %>%
+  plot_early_bias_RMSE("RMSE", "RMSE", 0, 
+                       combine_first_two_rows = FALSE, 
+                       global_var_name = "global_y_ranges_RMSE") +
+  ggtitle("Non-bisection Methods and SimpBisection") +
+  theme(title = element_text(size = 16))
+
+p.RMSE1 / p.RMSE2  +
+  plot_annotation(
+    title = 'RMSE in Study 2: Fixed Number of Iterations',
+    theme = theme(plot.title = element_text(size = 28, hjust = .5))) +
+  plot_layout(guides = 'collect',
+              axes = 'collect'  # This collects both x and y axes
+              )
+```
+
+### Relative RMSE
+
+```{r, fig.height=13, fig.width=14}
+df.rRMSE <- early.bias_RMSE %>% 
+  group_by(phi, utility, early_stop) %>%
+  mutate(
+    relative_RMSE = RMSE / RMSE[method == "Bisection"],
+    early_stop = as.factor(early_stop)
+  ) %>% 
+  filter(method != "Bisection")
+
+
+invisible(df.rRMSE %>% 
+  plot_early_bias_RMSE("relative_RMSE", "", 1, 
+                       combine_first_two_rows = FALSE, 
+                       global_var_name = "global_y_ranges_relativeRMSE"))
+
+
+# plot_early_bias_RMSE("relative_RMSE", "Relative RMSE to Biscetion", 1)
+
+
+p.rRMSE1 <- df.rRMSE %>% 
+  filter(grepl("^(Bisection)|(MOBS)", method)) %>%
+  plot_early_bias_RMSE("relative_RMSE", "Relative RMSE", 1, 
+                       combine_first_two_rows = FALSE, 
+                       global_var_name = "global_y_ranges_relativeRMSE") +
+  ggtitle("Bisection-based Methods") +
+  theme(title = element_text(size = 16))
+
+p.rRMSE2 <- df.rRMSE %>% 
+  filter(!grepl("^(Bisection)|(MOBS)", method)) %>%
+  plot_early_bias_RMSE("relative_RMSE", "Relative RMSE", 1, 
+                       combine_first_two_rows = FALSE, 
+                       global_var_name = "global_y_ranges_relativeRMSE") +
+  ggtitle("Non-bisection Methods and SimpBisection") +
+  theme(title = element_text(size = 16))
+
+p.rRMSE1 / p.rRMSE2  +
+  plot_annotation(
+    title = 'Relative RMSE to Bisection in Study 2',
+    theme = theme(plot.title = element_text(size = 28, hjust = .5))) +
+  plot_layout(guides = 'collect',
+              axes = 'collect'  # This collects both x and y axes
+              )
+```
+
+
+## Loss Aversion
+
+- 除了在 $\phi$ 很小的情況下，SimpBisection 表現跟Bisection法差不多。
+
+    -   結果有點亂，不好討論。
+
+### Preprocess
+
+```{r early_LA}
+# compute True LA coef. values
+trueLA_df <- early_df %>% 
+  select(!data) %>% 
+  mutate(KW = - truev_x1pos / truev_x1neg) %>%
+  pivot_longer(cols = matches(".*[1-9][pos|neg]"),
+                 names_to = c("trial", "type"),
+                 names_pattern = "x(\\d)(.*)",
+                 values_to = "value") %>%
+  mutate(
+    trial = as.integer(trial),
+    type = ifelse(type == "pos", "gain", "loss")  # Assign gain/loss
+  ) %>% 
+  pivot_wider(names_from = type, values_from = value) %>%
+  nest(data = c(trial, gain, loss))
+
+trueLA_df <- trueLA_df %>% 
+  mutate(
+    KT = map(data, ~ KT2(.x)),
+    .keep = "unused"
+    ) %>%
+  unnest_wider(KT, names_sep = "_") %>% 
+  pivot_longer(cols = KW:KT_median,
+               names_to = "LA_type",
+               values_to = "true_LA_est") %>%
+  rename(true_KT_classification = "KT_classification")
+```
+
+### Compute LA coef from simulation data
+
+```{r LA2}
+file_path <- file.path(dir_name, "Study2_LA_df.RDS")
+
+if (file.exists(file_path)) {
+  LA_result <- read_rds(file_path)
+  print(paste("File read from:", file_path))
+} else {
+  library(furrr)
+  LA_result <- early_df %>% 
+    select(!starts_with("true")) %>% 
+    unnest(cols = c(data)) %>% 
+    mutate(KW = -x1pos/x1neg)
+  
+  LA_result <- LA_result %>% 
+    pivot_longer(cols = matches(".*[1-9][pos|neg]"),
+                   names_to = c("trial", "type"),
+                   names_pattern = "x(\\d)(.*)",
+                   values_to = "value") %>%
+    mutate(
+      trial = as.integer(trial),
+      type = ifelse(type == "pos", "gain", "loss")  # Assign gain/loss
+    ) %>% 
+    pivot_wider(names_from = type, values_from = value) %>%
+    nest(data = c(trial, gain, loss))
+  plan(multisession)
+    # Measure system time for paralleled processing
+  print(Sys.time())
+  tm <- system.time({
+    LA_result <- LA_result %>%
+      # slice_sample(n = 500) %>%
+      mutate(
+        # stores median, mean and classification of KT
+        # this may cause duplication in interpolation `approx` function
+        KT = future_map(data, ~ KT2(.x)),
+        .keep = "unused" 
+      ) %>%
+      unnest_wider(KT, names_sep = "_") %>% 
+      pivot_longer(cols = KW:KT_median,
+                   names_to = "LA_type",
+                   values_to = "LA_est")
+  })
+  print(tm)
+  # Save LA_result as an RDS file
+  saveRDS(LA_result, file = file_path)
+  print(paste("File saved at:", file_path))
+}
+
+```
+
+
+```{r}
+# file_path <- file.path(dir_name, "LA_reslut_df_early.RDS")
+# LA_result <- read_rds(file_path)
+LA_result <- LA_result %>%
+  select(!x0) %>% 
+  left_join(trueLA_df, by = join_by(alpha, beta, lambda, LA_type)) %>% 
+  mutate(
+    early_stop = as.numeric(early_stop),
+    method = case_when(
+      method == "Bisection_mixASA" ~ "Bisection-ASA",
+      TRUE ~ method # Keep other values unchanged
+      ),
+    method =
+      factor(method,
+             levels = method_levels
+             )
+    )
+```
+
+
+### 95% CI
+
+```{r include=FALSE}
+custom_shapes <- c(rep(21, 3), 24, 24, 25,25, 22, 22, 21)
+names(custom_shapes) <- method_levels
+```
+
+
+```{r funcLA}
+##
+plot_LA_estimates <- function(data, subset_filter) {
+  data %>%
+    filter({{ subset_filter }},
+           is.finite(LA_est),
+           early_stop == 10,
+           LA_type != "KT_reg") %>%
+    mutate(early_stop = factor(as.numeric(early_stop))) %>%
+    group_by(phi, method, LA_type, early_stop) %>%
+    ggplot() +
+    geom_vline(
+      aes(xintercept = true_LA_est),
+      lty = 2, color = "grey30", linewidth = 1.05
+    ) +
+    stat_summary(
+      aes(x = LA_est, y = method, color = method),
+      geom = "errorbar",
+      position = position_dodge(0.6),
+      fun.min = \(x) quantile(x, 0.025, na.rm = TRUE),
+      fun.max = \(x) quantile(x, 0.975, na.rm = TRUE),
+      linewidth = 1.2, width = 0.5
+    ) +
+    stat_summary(
+      aes(x = LA_est, y = method, fill = method, shape = method, color = method),
+      position = position_dodge(0.6),
+      fun = \(x) mean(x, na.rm = TRUE),
+      geom = "point",
+      size = 3.0
+    ) +
+    facet_grid(phi ~ LA_type, scales = "free") +
+    scale_x_continuous(
+      transform = scales::pseudo_log_trans(base = 10),
+      breaks = c(-20, -10, -5, 0, 1, 5, 10, 20, 40)
+    ) +
+    scale_shape_manual(values = custom_shapes) +   # Custom shape mapping
+    labs(
+      x = "Loss Aversion Coefficient",
+      y = "Methods",
+      title = "Loss Aversion Coefficients Estimates (Iteration = 10)"
+    ) +
+    theme(
+      panel.spacing.x = grid::unit(1, "lines"),     # Adjusts horizontal spacing
+      legend.title = element_blank(),
+      legend.text = element_text(size = 14)
+    )
+}
+```
+
+
+```{r fig.height=9, fig.width=10}
+# filtered
+LA_result %>%
+  plot_LA_estimates(!grepl("randInit$", method))
+pname <- "study2_LA_Summary_iter10woRandInit.pdf"
+save_fig(pname, width = 10, height = 9)
+
+LA_result %>%
+  plot_LA_estimates() +
+  labs(
+    title = "Loss Aversion Coefficients Estimates (Iteration = 10, All Methods)"
+  )
+pname <- "study2_LA_Summary_iter10.pdf"
+save_fig(pname, width = 11, height = 9)
+```
+
+### Bias and RMSE
+
+```{r}
+LA_summ <- LA_result %>% 
+  filter(is.finite(LA_est)) %>%  
+  # filter(!grepl("randInit$", method)) %>%
+  group_by(lambda, phi, method, LA_type, early_stop) %>% 
+  summarise(
+    bias = mean((LA_est - true_LA_est), na.rm = TRUE),
+    RMSE = mean((LA_est - true_LA_est)^2, na.rm = TRUE),
+    .groups = "drop"
+  ) %>% 
+  group_by(phi, LA_type, early_stop) %>% 
+  mutate(relative_RMSE = RMSE / RMSE[method == "Bisection"]) %>% 
+  ungroup()
+```
+
+```{r plot_LA}
+plot_LA <- function(data, var_y, subset_filter) {
+  y_label <- rlang::as_label(rlang::enquo(var_y)) %>%   # Convert to string
+    stringr::str_to_sentence()
+  
+  data %>%
+    filter({{ subset_filter }},
+           is.finite({{ var_y }}),
+           early_stop == 10,
+           LA_type != "KT_reg") %>%
+    mutate(early_stop = as.factor(early_stop)) %>%
+    ggplot(aes(x = method)) +
+    geom_hline(yintercept = 0, color = "grey30", lty = 2, alpha = 0.8) +
+    geom_point(
+      aes(y = {{ var_y }}, fill = method, color = method, shape = method),
+      position = position_dodge(width = 0.4),
+      size = 3.0
+    ) +
+    facet_grid(
+      rows = vars(phi),
+      cols = vars(LA_type),
+      scales = "free_y"
+    ) +
+    scale_shape_manual(values = custom_shapes) +
+    labs(
+      x = "Method",
+      y = y_label,
+      title = glue("Loss Aversion Coefficients: {y_label} (Iteration = 10)")
+    ) +
+    theme(
+      legend.title = element_blank(),
+      legend.text = element_text(size = 14),
+      axis.text.x = element_text(size = 11, angle = 90, vjust = 0.55),
+      strip.text = element_text(size = 13)
+    )
+}
+```
+
+```{r, fig.height=9, fig.width=9}
+LA_summ %>% 
+  plot_LA(bias, !grepl("randInit$", method))
+pname <- "study2_LA_bias_iter10woRandInit.pdf"
+save_fig(pname, width = 9, height = 9)
+
+LA_summ %>% 
+  plot_LA(bias)
+pname <- "study2_LA_bias_iter10.pdf"
+save_fig(pname, width = 10, height = 9)
+```
+
+The cell below shows alternative visualization:
+
+```{r eval=FALSE, fig.width=8, include=FALSE}
+# Filter and prepare data
+filtered_data <- LA_summ %>%
+  filter(is.finite(bias) & early_stop == 10 & LA_type != "KT_reg") %>%
+  mutate(early_stop = as.factor(early_stop))
+
+# Define unique facets
+facets <- unique(filtered_data %>% select(phi, LA_type))
+
+# Create a list to store individual plots
+plot_list <- list()
+
+# Loop over each facet combination
+for (i in 1:nrow(facets)) {
+  facet_data <- filtered_data %>%
+    filter(phi == facets$phi[i], LA_type == facets$LA_type[i])
+  
+  y_limits <- if (i <= 6) c(-0.5, 1) else c(-2, 4)
+  
+  p <- ggplot(facet_data, aes(x = method)) +
+    geom_hline(yintercept = 0, color = "grey30", lty = 2, alpha = 0.8) +
+    geom_point(aes(y = bias, fill = method, color = method, shape = method),
+               position = position_dodge(width = 0.4),
+               size = 3.0) +
+    scale_shape_manual(values = custom_shapes) +  # Custom shape mapping
+    labs(x = "Method",
+         y = "Bias",
+         title = glue("Phi:{facets$phi[i]}; {facets$LA_type[i]}")
+         ) +
+    ylim(y_limits)+
+  # ylim(-1, 1)+  # Set your desired y-axis limits here
+    theme(
+      # legend.position = "bottom",
+      legend.title = element_blank(),
+      axis.text.x = element_text(size = 11, angle = 90, vjust = .55),
+      strip.text= element_text(size = 11),
+      title = element_text(size = 10))
+  
+  plot_list[[i]] <- p
+}
+
+# Combine plots using patchwork
+combined_plot <- wrap_plots(
+  plot_list,
+  ncol = length(unique(filtered_data$LA_type))) +
+  plot_annotation(title = "Loss Aversion Coefficients: Bias (Iteration = 10)") +
+  plot_layout(axes = "collect",guides = 'collect') &
+  theme(legend.position='bottom')
+combined_plot
+```
+
+
+#### RMSE
+
+```{r, rows.print=10}
+# simply shows the data table
+LA_summ %>% 
+  filter(early_stop==10) %>% 
+  select(!c(lambda, bias)) %>% 
+  arrange(phi, LA_type, RMSE)
+```
+
+```{r, fig.height=9, fig.width=10}
+LA_summ %>% 
+  plot_LA(RMSE, !grepl("randInit$", method)) +
+  labs(
+    y = 'RMSE',
+    title = "Loss Aversion Coefficients: RMSE (Iteration = 10)"
+  )
+pname <- "study2_LA_RMSE_iter10woRandInit.pdf"
+save_fig(pname, width = 9, height = 9)
+
+LA_summ %>% 
+  plot_LA(RMSE) +
+  labs(
+    y = 'RMSE',
+    title = "Loss Aversion Coefficients: RMSE (Iteration = 10)"
+  )
+pname <- "study2_LA_RMSE_iter10.pdf"
+save_fig(pname, width = 10, height = 9)
+```
+
+
+## Violations of Monotonicity
+
+-   EDP stage 1 的違反比率非常高 (20/87 當取到$x_8$, 14/87當取到$x_6$)。
+    
+    -  有一可能也是我們測的樣本點太多。
+
+-   但 simplified Bisection 除了$\phi$ small 時特別高，其他都在3%以下。
+    
+    -   另外違反率大小在目前設定下看起來跟$\lambda$ (i.e., value function)沒有關係，只跟 $\phi$ 有關係。
+    
+    -   從模型角度來看就是因為我們收的受試者選擇較隨機 ($\phi$較小)而非其他緣故
+
+### Simulation results
+
+-   Simplified-Bisection 在 $\phi$ small 時的違反monotonicity比率甚至比PEST還要誇張。
+
+-   這也能部份解釋 EDP 當時違反monotonicity的情況很嚴重，代表此方法容易導致違反monotonicity。
+    
+-   過去研究中資料違反 monotonicity/stochastic dominance 的比率 (兩者皆使用 3+1 次 iterations 的bisection-slider法)
+
+    -   A學者(2016) 違反stochastic dominance 比例(3/75 = `r round(3/75, 3)`)
+
+    -   Bleichrod and L’Haridon (2023) 違反stochastic dominance 比例(10/122 = `r round(10/122, 3)`)
+
+```{r paged.print=TRUE, rows.print=9*2}
+monotone_df <- cleaned_df %>% 
+  select(!true_value) %>% 
+  mutate(utility = as.integer(utility) - 7L) %>% 
+  pivot_wider(
+    names_from = utility,
+    values_from = x_value,
+    names_glue = "x{abs(utility)}{case_when(utility > 0 ~ 'pos', 
+                                       utility < 0 ~ 'neg', 
+                                       TRUE ~ '')}"
+  ) %>% 
+  relocate(gen_util_levels(6L, FALSE), .after = x0) %>% 
+  rowwise() %>%
+  mutate(
+    violation = is.unsorted(c_across(x6neg:x6pos)),
+    ) %>%
+  ungroup()
+
+monotone_df %>% 
+  mutate(early_stop = as.numeric(early_stop),
+         method = factor(method, levels = method_levels)
+         ) %>% 
+  group_by(phi, early_stop, method) %>%
+  summarise(
+    # n = n(),
+    violation_ratio = glue("{round(sum(violation)/n()*100,1)}%"),
+    .groups = "drop"
+    ) %>%
+  pivot_wider(
+    names_from = early_stop,
+    names_glue = "Iteration = {early_stop}",
+    values_from = violation_ratio
+  ) %>% 
+  filter(!(`Iteration = 5` == "0%" & `Iteration = 10` == "0%")) %>% 
+  xtable::xtable()
+```
+
+
+# 小節
+
+-   EDP 中 simplified Bisection 法在受試者選擇較一致時與Bisection法的表現差不多，但是在 $\phi$ 很小的時候表現非常差。
+  
+    -   RMSE 較大(在gain frame)，且違反monotonicity的比例較高。
+
+-   在 EDP 實驗中產生比較多違反monotonicity的受試者，可能的解釋之一是有許多受試者選擇隨機性較高。
+    
+    -   違反monotonicity如果只和 $\phi$ 有關而和value function無關，或許可以從這方面去推估實驗$\phi$的數值。
+
+
+
