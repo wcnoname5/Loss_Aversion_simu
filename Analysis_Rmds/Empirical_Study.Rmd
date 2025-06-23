@@ -37,12 +37,11 @@ library(glue)
 library(magrittr)
 library(patchwork)
 # import functions
-source("./functions/analysis_functions.R")
+source(here::here("functions", "analysis_functions.R"))
 # ggplot settings
 theme_set({
-  theme_bw()+    
+  theme_bw()+
   theme(axis.title = element_text(size = 16),
-        # axis.text.x = element_text(angle = 45, hjust = 1),
         axis.text = element_text(size = 13),
         strip.text= element_text(size = 12),
         legend.title = element_text(size = 16),
@@ -62,14 +61,13 @@ theme_set({
 
     -  姑且先稱作simplified Bisection (不用modified 是怕跟MOBS搞混)，取`SimpBisection`
     
--   EDP 當時測的樣本點比A學者2016年的多，收到 $x_8^+, x_8^-$，且 Iteration = 5。以下模擬也會以這部分為基準進行討論。
+-   EDP 當時測的樣本點比Abdellaoui et al. (2016) 年的多，收到 $x_8^+, x_8^-$，且 Iteration = 5。
 
 
 ## Directories
 
 ```{r dir_params}
-dir_name <- "./data"
-pic_path <- "./figs"
+dir_name <- here::here("data")
 ```
 
 
@@ -93,7 +91,7 @@ util.levels <- c(
   paste0("x", 1:8, "pos")
 )
 
-EDP_rawdata <- read_csv("data/EDP_stage1_rawdata.csv")
+EDP_rawdata <- read_csv(here::here("data", "EDP_stage1_rawdata.csv"))
 
 EDP_rawdata %>% 
   relocate(util.levels, .after = subject) %>% 
@@ -114,7 +112,7 @@ EDP_rawdata %>%
 
 -   過去研究中資料違反 monotonicity 的比率 (兩者皆使用 3+1 次 iterations 的bisection-slider法)
 
-    -   A學者(2016) 違monotonicity比例(3/75 = `r round(3/75, 3)`)
+    -   Abdellaoui et al. (2016) 違monotonicity比例(3/75 = `r round(3/75, 3)`)
 
     -   Bleichrod and L’Haridon (2023) 違反monotonicity比例(10/122 = `r round(10/122, 3)`)
 
@@ -173,7 +171,7 @@ EDP_LA_data <- EDP_nestdata %>%
 
 ### 剔除違反monotonicity
 ```{r}
-EDP_LA_data %>%
+EDP_LA_result.Monotone_only <- EDP_LA_data %>%
   filter(!violation.6) %>% 
   group_by(LA_type) %>% 
   summarise(
@@ -184,11 +182,12 @@ EDP_LA_data %>%
 )
 # kableExtra::kbl(caption = "Loss Aversion Coefficients",
 # format = "latex")
+EDP_LA_result.Monotone_only
 ```
 
 ### 保留違反monotonicity
 ```{r}
-LA_result <- EDP_LA_data %>%
+EDP_LA_result <- EDP_LA_data %>%
   group_by(LA_type) %>% 
   summarise(
     # LA_median = quantile(LA_est, .50) |> round(2),
@@ -197,22 +196,28 @@ LA_result <- EDP_LA_data %>%
     Seeking = sum(Classification == "seeking"),
     Neutral = sum(Classification == "neutral")
 )
+
+EDP_LA_result %>% 
+  xtable::xtable()
 ```
 
 兩表沒有相差太多，正式報告時應該保留前者就好。
 
 ```{r}
-past_research <- tribble(
+past_studies <- tribble(
   ~research, ~LA_type, ~Averse, ~Seeking, ~Neutral,
-  "A2016",   "KT",   58,    10,1,
-  "A2016",   "KW",   56,    14,1,
-  "BL2023", "KT",    73,    39,3,
-  "BL2023", "KW",    73,    35,14
+  "A2016",   "KT",   58,    10, 1,
+  "A2016",   "KW",   56,    14, 1,
+  "BL2023", "KT",    73,    39, 3,
+  "BL2023", "KW",    73,    35, 14
 )
 
-research_summ <- LA_result %>% 
-  add_column(research = "EDP") %>% 
-  bind_rows(past_research) %>% 
+research_summ <- EDP_LA_result %>% 
+  add_column(research = "EDP") %>%
+  bind_rows(EDP_LA_result.Monotone_only |>
+              add_column(research = "EDP_monotone")
+            ) %>% 
+  bind_rows(past_studies) %>% 
   filter(!LA_type == "KT_mean") %>% 
   select(!Median_IQR) %>% 
   mutate(LA_type = case_when(LA_type == "KT_median" ~  "KT",
@@ -226,24 +231,43 @@ KT_mtx <- research_summ %>%
   filter(LA_type == "KT") %>% 
   select(research, Averse, nAverse) %>%  # Keep relevant columns
   column_to_rownames(var = "research") %>%  # Set research as row names
-  as.matrix()  # Convert to matrix
+  as.matrix()
 
 KW_mtx <- research_summ %>%
   filter(LA_type == "KW") %>% 
   select(research, Averse, nAverse) %>%  # Keep relevant columns
   column_to_rownames(var = "research") %>%  # Set research as row names
-  as.matrix()  # Convert to matrix
+  as.matrix()
 
 # Chi-squared test
-chisq.test(KW_mtx)
-chisq.test(KT_mtx)
+## All EDP data
 
-# research_summ %>% 
-#   rowwise() %>% 
-#   mutate(prop_Averse = Averse/(Averse+ nAverse))
+for (exclude in c("EDP", "EDP_monotone")) {
+  for (name in c("KT", "KW")) {
+    mtx <- get(paste0(name, "_mtx"))
+    
+    filtered_mtx <- mtx[rownames(mtx) != exclude, ]
+    
+    aa <- if (exclude == "EDP") "EDP exclude violations of Monotonicity." else "All EDP data."
+    cat("=== Index:", name, " | Data:", aa, "===\n")
+    print(chisq.test(filtered_mtx))
+    cat("N =", sum(filtered_mtx), "\n\n")
+  }
+}
+
 ```
+
+
 ```{r}
+# num of all obs (keep monotone only)
 research_summ %>% 
+  filter(research != "EDP") %>% 
+  group_by(LA_type) %>% 
+  summarise(N = sum(Averse, nAverse))
+
+# num of all obs (all EDP data)
+research_summ %>% 
+  filter(research != "EDP_monotone") %>% 
   group_by(LA_type) %>% 
   summarise(N = sum(Averse, nAverse))
 ```
@@ -252,7 +276,7 @@ research_summ %>%
 
 -   可以發現在分類上EDP資料裡seeking 的比例比兩個這兩個實驗較多，而loss aversion 係數估計上比較靠近2023的結果。
 
-#### A學者
+#### Abdellaoui et al. (2016)
 
 見Risk 列
 ![A2016](pics/A2016_loss.png)
@@ -261,7 +285,6 @@ research_summ %>%
 見risk, High-stakes 列
 
 ![BL2023](pics/BL2023_loss.png)
-
 
 
 use `ggmatrix` instead

@@ -108,7 +108,8 @@ Adaptive_bound_strategy <- R6Class(
     update = function(choice, last_stim, cur_task_idx, cur_trial, context) {
       step <- private$step
       CheckGainBoundary <- context$CheckGainBoundary # logical
-      bounds <- context$bounds_manager$get_bounds(cur_task_idx)      # cat("DEBUG Adaptive_bound_strategy update:\n")
+      bounds <- context$bounds_manager$get_bounds(cur_task_idx)
+      # cat("DEBUG Adaptive_bound_strategy update:\n")
       # cat("  choice:", choice, "last_stim:", last_stim, "\n")
       # cat("  cur_task_idx:", cur_task_idx, "cur_trial:", cur_trial, "\n")
       # cat("  CheckGainBoundary:", CheckGainBoundary, "\n")
@@ -1205,11 +1206,11 @@ Game <- R6Class(
       cur_stim <- private$task_logger$get_log(cur_est_pt)[cur_trial]      # Update using strategy
       new_value <-
         current_strategy$update(choice, cur_stim, cur_task_idx, cur_trial, context)
-      cat("DEBUG update_task_log: cur_task_idx =", cur_task_idx, "cur_trial =", cur_trial, "choice", choice, "from", class(current_strategy)[1],"\n")
-      cat("  cur_Stim =", cur_stim, "new_Stim =", new_value ,  "\n")      # Get step size to determine if we should continue
+      # cat("DEBUG update_task_log: cur_task_idx =", cur_task_idx, "cur_trial =", cur_trial, "choice", choice, "from", class(current_strategy)[1],"\n")
+      # cat("  cur_Stim =", cur_stim, "new_Stim =", new_value ,  "\n")      # Get step size to determine if we should continue
       step <- current_strategy$get_step(cur_task_idx, cur_trial, context)
 
-      cat("   step =", step, "diff=", abs(new_value - cur_stim), "min_step =", private$min_step, "\n")
+      # cat("   step =", step, "diff=", abs(new_value - cur_stim), "min_step =", private$min_step, "\n")
 
       if (!is.numeric(step) || is.na(step)) {
         print(cur_task_idx)

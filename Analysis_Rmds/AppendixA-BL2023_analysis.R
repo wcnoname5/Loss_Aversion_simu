@@ -1,43 +1,45 @@
 library(readxl)
 library(tidyverse)
-# dir_name <- "./ASA_simulation_RDS"
-pic_path <- "./simulation_Rmds/figs"
+pic_path <- here::here("Results_figs")
+if (!dir.exists(pic_path)) {
+  dir.create(pic_path, recursive = TRUE)
+}
+## The dataset from the article https://doi.org/10.1017/jdm.2023.2
 BL2023_raw <- read_excel(
-  "E:/Proj/Loss_Aversion_simu/BL2023_data/Large_Stakes_Experiment_Data.xlsx", 
+  here::here("data", "Large_Stakes_Experiment_Data.xlsx"),
   sheet = "Risk"
-  )
-
-# check violations of Stochastic Dominance
+)
+# Check violations of Monotonicity
 BL2023 <- BL2023_raw %>%
   rowwise() %>%
   mutate(violation = is.unsorted(c(`X5-`, `X4-`, `X3-`,`X2-`,`X1-`, `0`,
                                    `X1+`, `X2+`, `X3+`,`X4+`,`X5+`))) %>% 
-  ungroup() %>% 
+  ungroup() %>%
   filter(!violation)
 
-cat("Original observaions:", nrow(BL2023_raw),
-    "; Obs exclude Violations of Stochastic Dominance:", nrow(BL2023), "\n")
+cat("Original sample size: ", nrow(BL2023_raw),
+    "; Observations satisfy Monotonicity: ", nrow(BL2023), "\n", sep = "")
 
-trimmed_obs <- BL2023 %>% 
+trimmed_obs <- BL2023 %>%
   mutate(x3p_diff = `X3+` - `X3+repeat`) %>%
   filter(
     x3p_diff > quantile(x3p_diff, 0.025),  # Keep rows above the 5th percentile
     x3p_diff < quantile(x3p_diff, 0.975)   # Keep rows below the 95th percentile
   )
 
-var_diff <- trimmed_obs %>% 
-  pull(x3p_diff) %>% 
+var_diff <- trimmed_obs %>%
+  pull(x3p_diff) %>%
   var()
 
-# Error variance estimate = 1/2 difference variance estimate 
-var_e <- var_diff/2
+# Error variance estimate = 1/2 difference variance estimate
+var_e <- var_diff / 2
 sd_e <- sqrt(var_e)
 cat("SD estimate:", sd_e, "\n")
 # Moment Estimate of b param. in Laplace Distribution
-b <-  (var_e/2) |> sqrt()
+b <-  (var_e / 2) |> sqrt()
 
-dlaplace <- function(x, mu=0, b=1) {
-  (1/(2*b)) * exp(-abs(x - mu)/b)
+dlaplace <- function(x, mu = 0, b = 1) {
+  (1 / (2 * b)) * exp(-abs(x - mu) / b)
 }
 
 BL2023 %>%

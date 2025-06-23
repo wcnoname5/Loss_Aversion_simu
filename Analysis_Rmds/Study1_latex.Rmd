@@ -37,11 +37,11 @@ library(magrittr)
 library(patchwork)
 library(kableExtra)
 # import functions
-source("../functions/player_and_lotteries.R")
-source("../functions/analysis_functions.R")
+source(here::here("functions", "player_and_lotteries.R"))
+source(here::here("functions", "analysis_functions.R"))
 # ggplot settings
 theme_set({
-  theme_bw()+    
+  theme_bw()+
   theme(
     legend.position = "bottom",
     legend.title = element_text(size = 17),
@@ -49,7 +49,7 @@ theme_set({
     axis.title = element_text(size = 16),
     axis.text.x = element_text(vjust = 0.5, hjust = 0.5),
     axis.text = element_text(size = 13),
-    strip.text= element_text(size = 12),
+    strip.text = element_text(size = 12),
     title = element_text(size = 18))
 })
 ```
@@ -91,7 +91,7 @@ utility_method_levels <-
             "Bisection","Bisection_fixbnd",
             "Bisection-Slider", "Bisection-Slider_fixbnd",
             "MOBS", "MOBS_fixbnd",
-             "ASA", "ASA_randInit",
+            "ASA", "ASA_randInit",
             "SimpBisection", "SimpBisection_randInit",
             "PEST", "PEST_randInit")
 
@@ -100,14 +100,26 @@ utility_method_levels <-
 ## Directories
 
 ```{r dir_params}
-dir_name <- "./ASA_simulation_RDS"
-pic_path <- "./figs"
+# pics and data directories
+dir_name <- here::here("simulated_data")
+pic_path <- here::here("Results_figs")
+if (!dir.exists(pic_path)) {
+  dir.create(pic_path, recursive = TRUE)
+}
 ```
 
-# Simulation 1 (new version)
+# Simulation 1
 
+Read files and preprocess data.
 ```{r bound2}
-file_name <- "Study1_df.RDS"
+file_name <- 
+  list.files(dir_name, pattern = "Study1_simulation.*\\.rds", full.names = FALSE) %>%
+  sort() %>%
+  tail(1)  # Get the most recent file (assuming filenames sort chronologically)
+
+# Print the file found for verification
+cat("Using simulation file:", file_name, "\n")
+
 fname <- file.path(dir_name, file_name)
 
 bound_df <- read_rds(fname) %>% 
@@ -174,8 +186,7 @@ cleaned_df <- bound_df %>%
 
 ## Utility Curve Plots
 
-顏色線段代表 95% 的觀測值分布範圍長度。黑色虛線為實際數值
-
+The colored line segments represent the 95% CI of the observations. The black dashed line (and the hollow dots) shows the true values.
 
 
 ```{r, fig.height=7, fig.width=14}
@@ -222,10 +233,12 @@ cleaned_df %>%
     )
 
 pname <- "study1_utility_curve.pdf"
-save_fig(pname, width = 14, height = 7)
+save_fig(pname, width = 14, height = 7, p_path = pic_path)
 ```
 
 ## Bias and RMSE
+
+This sections summarizes the bias and RMSE of the elicited values compared to the true values.
 
 ```{r summ_biasRMSE}
 df.bias_RMSE <- cleaned_df %>%
@@ -301,15 +314,16 @@ p.bias <- df.bias_RMSE %>%
 
 pname <- "study1_bias.pdf"
 p.bias
-save_fig(pname, width = 13, height = 7)
+save_fig(pname, width = 13, height = 7, p_path = pic_path)
 ```
 
 
 ### Bias2
 
-Vary in $\lambda$ in the value function.
+One may suspect that the difference it due to the specification of the value function.
+Hence we vary in $\lambda$ in the value function in this section.
 
--   3 levels: 0.5, 1, 2.25.
+-   Theree levels of $\lambda$ are specified: 0.5, 1, 2.25.
 
 ```{r bias_vary_lambda, fig.height=14, fig.width=14}
 df.tmp <- cleaned_df %>%
@@ -385,7 +399,7 @@ p <- p1 / p2 +
 p
 pname <- "study1_bias_different_Lambda.pdf"
 
-save_fig(pname, width = 14, height = 14)
+save_fig(pname, width = 14, height = 14, p_path = pic_path)
 ```
 
 
@@ -448,9 +462,8 @@ p.RMSE <- df.bias_RMSE %>%
     )
 
 pname <- "study1_RMSE.pdf"
-save_fig(pname, width = 13, height = 7)
+save_fig(pname, width = 13, height = 7, p_path = pic_path)
 ```
-
 
 
 ## Bias+RMSE Combined
@@ -470,12 +483,12 @@ p <- p.bias / p.RMSE +
 
 pname <- "study1_biasRMSE.pdf"
 p
-save_fig(pname, width = 16, height = 16)
+save_fig(pname, width = 16, height = 16, p_path = pic_path)
 
 ```
 
 
-## Step Count
+## Iteration Counts
 
 ```{r eval=FALSE, include=FALSE}
 len_df <- read_rds(fname) %>% 
@@ -516,11 +529,11 @@ len_df %>%
 
 ```
 
-# Inspect alternative determination rule for ASA
+# Inspect alternative termination rule for ASA
 
-Since step size < 5 may not be appropriate for ASA.
+-  Since step size < 5 may not be appropriate for ASA (at least 64 iterations to terminate).
 
-The m-reversal-out-of-k rule is applied.
+-  The `m-reversal-out-of-k` rule is applied. We extract cases where 6 reversals happen in last 8 trials as the final estimate, compute the final trial counts and the estimates.   
 
 ```{r}
 ASA_df <- read_rds(fname) %>% 
@@ -540,44 +553,9 @@ ASA_df <- read_rds(fname) %>%
 ```
 
 
-```{r eval=FALSE, include=FALSE}
-max_len <- ASA_df %>% 
-  summarise(max_len = max(map_int(seq, length))) %>% 
-  pull(max_len)
-
-# Pad each sequence with NA to the same length
-ASA_df <- ASA_df %>%
-  mutate(seq = map(seq, ~{ length(.x) <- max_len; .x })) %>% 
-  unnest_longer(seq, indices_to = "iter")
-
-
-
-# Plot each sequence as a separate line
-ASA_df %>%
-  filter(phi == "medium", lambda == 2.25, utility == "1", method == "ASA") %>%
-  mutate(seq = map(seq, ~{ length(.x) <- max_len; .x })) %>% 
-  slice_sample(n=20) %>% 
-  unnest_longer(seq, indices_to = "iter") %>% 
-  ggplot(
-    aes(x = iter, y = seq, group = Nsim, color = factor(Nsim))) +
-  geom_line(alpha = 0.8) +
-  # geom_point() +
-  geom_hline(aes(yintercept = true_value + c(100,0, -100)),
-             linetype = "dashed")+
-  labs(
-    title = "Sequences as Line Plots",
-    x = "Iteration",
-    y = "Value"
-  ) +
-  guides(color = "none")
-  # theme_minimal()
-
-
-
-
-```
-
 ```{r}
+# Function to find a subvector with at least m unique values in k length
+# This function helps us to truncate the sequence with the m-reversal-out-of-k rule
 find_subvector <- function(vec, m, k, start.from = 1) {
   # find until a subarray with length of k contains more than m reversals
   n <- length(vec)
@@ -613,6 +591,8 @@ find_subvector <- function(vec, m, k, start.from = 1) {
         index = n
       ))  # No match found
 }
+
+# Truncated ASA sequences
 sliced_ASA <- ASA_df %>%
   filter(lambda == 2.25, grepl("^ASA.*", method)) %>%
   mutate(step = map(seq, diff),
@@ -635,10 +615,12 @@ sliced_ASA <- ASA_df %>%
 
 ```{r}
 sliced_ASA %>%
-  group_by(phi, method) %>% 
+  group_by(phi, method) %>%
   summarise(mean_iteration_number = mean(sliced_N_iter))
 ```
 
+
+A visualization of the sliced ASA results, showing the distribution of the iteration counts across different methods and $\phi$ values.
 ```{r fig.height=6, fig.width=12}
 sliced_ASA %>%
   group_by(phi, method, utility) %>% 
@@ -662,7 +644,7 @@ sliced_ASA %>%
   scale_x_continuous(
     breaks = seq(0,200, 15)
   )
-    
+
 ```
 
 ## Bias & RMSE
@@ -788,144 +770,9 @@ sliced_ASA.biasRMSE %>%
 ```
 
 
-# Viz. for presentation
-
-## Utility
-
-```{r fig.height=5, fig.width=6}
-cleaned_df %>% 
-  filter(lambda == 2.25 & phi != "small" & method %in% c("ASA", "Bisection")) %>%
-  group_by(phi) %>% 
-  ggplot(aes(y = utility)) +
-  geom_hline(
-    yintercept = 
-      as.numeric(
-        factor("x0", levels = gen_util_levels()
-               )),
-    color = "red2",
-    linetype = "dashed", alpha = 0.8) +
-  # True utility curve
-  geom_line(
-    aes(y = utility, x = true_value, group = 1),
-    color = "black", linetype = "3331") +
-  geom_point(
-    aes(y = utility, x = true_value, group = 1),
-    color = "black", pch = 1, size =2.5) +
-  # 95% range
-  stat_summary(
-    aes(y = utility, x = x_value, color = phi, shape = phi),
-    geom = "pointrange",
-    fun = \(x) mean(x, na.rm = TRUE),
-    fun.min = \(x) quantile(x, .025, na.rm = TRUE),
-    fun.max = \(x) quantile(x, .975, na.rm = TRUE),
-    position = position_dodge(width = 0.9),
-    linewidth = 1.1, size = 0.6, alpha=.8
-  ) +
-  labs(x = "Elicited x ",
-       y = "V(x)",
-       title = "Value Curve",
-       color = "phi") +
-  facet_wrap(~ method, dir="v", ncol=2, nrow=1) +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 0.6, vjust=0.6),
-    strip.text= element_text(size = 15),
-    )
-
-ggsave(file.path(pic_path, "study1_utility_ABonly.png"),
-       units = "in", width = 6, height = 5)
-```
-
-## Bias RMSE
-
-```{r RMSE_bnd, fig.height=7, fig.width=13}
-p.bias <- df.bias_RMSE %>% 
-  filter(lambda == 2.25 & method %in% c("ASA", "Bisection") & boundary_type == 'equal_exp') %>% 
-  ggplot(aes(x = utility)) +
-  geom_line(aes(
-    x = utility,
-    y = bias,
-    # color = boundary_type,
-    group = boundary_type
-    ),
-    color = 'darkorange2',
-    linewidth = 1.2,
-    alpha = 0.8
-    ) +
-  geom_hline(yintercept = c(0), color = "grey30", lty=2, alpha=0.8, linewidth=1.2)+
-  geom_point(
-    aes(
-      y = bias,
-      # color = boundary_type,
-      # shape = boundary_type
-      ),
-    size = 3) +
-  facet_grid(rows = vars(phi),
-             cols = vars(method),
-             # scales = "free_y"
-             ) +
-  scale_x_discrete(labels = latex_labels) +
-  labs(x = expression(x["i"]),
-       y = "Bias",
-       title = "Bias")+
-  theme(
-    strip.text= element_text(size = 15)
-    )
-
-p.RMSE <- df.bias_RMSE %>% 
-  filter(lambda == 2.25 & method %in% c("ASA", "Bisection") & boundary_type == 'equal_exp') %>% 
-  ggplot(aes(x = utility)) +
-  geom_line(aes(
-    x = utility,
-    y = RMSE,
-    # color = boundary_type,
-    group = boundary_type
-    ),
-    color = 'darkcyan',
-    linewidth = 1.2,
-    alpha = 0.8
-    ) +
-  geom_hline(yintercept = c(0), color = "grey30", lty=2, alpha=0.8, linewidth=1.2)+
-  geom_point(
-    aes(
-      y = RMSE,
-      # color = boundary_type,
-      # shape = boundary_type
-      ),
-    size = 3) +
-  facet_grid(rows = vars(phi),
-             cols = vars(method),
-             # scales = "free_y"
-             ) +
-  scale_x_discrete(labels = latex_labels) +
-
-  labs(x = expression(x["i"]),
-       y = "RMSE",
-       title = "RMSE")+
-  theme(
-    strip.text= element_text(size = 15)
-    )
-
-p <- p.bias + p.RMSE +
-  plot_annotation(
-    title = 'Study1: Iterates Until Step Size < 5',
-    theme = theme(plot.title = element_text(size = 32, hjust = .5))) +
-  plot_layout(guides = 'collect') & 
-  theme(legend.position='bottom',
-        legend.text = element_text(size = 24),
-        legend.title = element_text(size = 26),
-        strip.text= element_text(size = 20),
-        axis.text.x = element_text(size = 16),
-        axis.title.x = element_text(size = 20),
-        )
-
-ggsave(file.path(pic_path, "study1_biasRMSE.png"),
-       plot = p,
-       units = "in", width = 14, height = 7)
-
-```
-
-
 # Additional Analysis: Loss aversion
+
+Although it is possible to estimate the loss aversion coefficient from the elicited values, we did not procced it.
 
 ## Preprocess
 

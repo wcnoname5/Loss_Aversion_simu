@@ -1,6 +1,8 @@
-source("E:/Proj/Loss_Aversion_simu/functions/player_and_lotteries.R")
+# This script calculates the phi values for the TO experiment
+# Given CPT parameters and experiment conditions (stakes)
+source(here::here("functions", "player_and_lotteries.R"))
 
-param <- list("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5)
+param <- list("alpha" = .88, "beta" = .88, "lambda" = 2.25, "wp" = .5, "wn" = .5)
 exp_param <- list(
   init_values =
     list("G"= 2000L,
@@ -15,7 +17,7 @@ exp_param <- list(
 
 # Prob of choosing the option having greater value
 softmax <- function(dU, phi) {
-  ifelse(dU >= 0, 
+  ifelse(dU >= 0,
          1 / (1 + exp(-dU * phi)), 
          1 / (1 + exp(dU * phi)))
 }
@@ -47,8 +49,8 @@ err <- c(0.2, 10 ^ (-1:-15))
 
 mtx <- matrix(0, nrow = 2, ncol = length(err),
               dimnames = list(c("L", "x1pos"), err))
-for (i in 1:length(err)){
+for (i in 1 : length(err)){
   mtx[, i] <-  solve_phi(c(dU_1st, dU_2nd), err[i])
 }
 cat("column names stand for error rate, row names stand for conditions. \n")
-print(round(mtx,7))
+print(round(mtx, 7))
