@@ -37,8 +37,8 @@ library(magrittr)
 library(patchwork)
 library(kableExtra)
 # import functions
-source("../functions/player_and_lotteries.R")
-source("../functions/analysis_functions.R")
+source(here::here("functions", "player_and_lotteries.R"))
+source(here::here("functions", "analysis_functions.R"))
 # ggplot settings
 theme_set({
   theme_bw()+    
@@ -103,9 +103,17 @@ utility_method_levels <-
 dir_name <- here::here("/ASA_simulation_RDS")
 pic_path <- here::here("./figs")
 
+
+# pics and data directories
+# dir_name <- here::here("simulated_data")
+# pic_path <- here::here("Results_figs")
+# if (!dir.exists(pic_path)) {
+#   dir.create(pic_path, recursive = TRUE)
+# }
+
 ```
 
-# Simulation 1 (new version)
+# Simulation 1 
 
 ```{r bound2}
 file_name <- "Study1_df.RDS"
@@ -175,8 +183,7 @@ cleaned_df <- bound_df %>%
 
 ## Utility Curve Plots
 
-顏色線段代表 95% 的觀測值分布範圍長度。黑色虛線為實際數值
-
+The colored line segments represent the 95% CI of the observations. The black dashed line (and the hollow dots) shows the true values.
 
 
 ```{r, fig.height=7, fig.width=14}
@@ -226,7 +233,7 @@ cleaned_df %>%
     )
 
 pname <- "study1_utility_curve.pdf"
-save_fig(pname, width = 14, height = 7)
+save_fig(pname, width = 14, height = 7, p_path = pic_path)
 ```
 
 ## Bias and RMSE
@@ -306,15 +313,19 @@ p.bias <- df.bias_RMSE %>%
 
 pname <- "study1_bias.pdf"
 p.bias
-save_fig(pname, width = 13, height = 7)
+save_fig(pname, width = 14, height = 7, p_path = pic_path)
 ```
 
 
-### Bias2
+### Bias2 (Additional Analysis)
 
-Vary in $\lambda$ in the value function.
+One may suspect that the difference it due to the specification of the value function.
+Hence we vary in $\lambda$ in the value function in this section.
 
 -   3 levels: 0.5, 1, 2.25.
+
+-   Theree levels of $\lambda$ are specified: 0.5, 1, 2.25.
+
 
 ```{r bias_vary_lambda, fig.height=14, fig.width=14}
 df.tmp <- cleaned_df %>%

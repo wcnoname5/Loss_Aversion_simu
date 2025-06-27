@@ -37,8 +37,8 @@ library(magrittr)
 library(patchwork)
 library(kableExtra)
 # import functions
-source("../functions/player_and_lotteries.R")
-source("../functions/analysis_functions.R")
+source(here::here("functions", "player_and_lotteries.R"))
+source(here::here("functions", "analysis_functions.R"))
 # ggplot settings
 theme_set({
   theme_bw()+    
@@ -119,6 +119,14 @@ method_levels <- c("Bisection", "Bisection-Slider","MOBS",
 ```{r dir_params}
 dir_name <- "./ASA_simulation_RDS"
 pic_path <- "./figs"
+
+# pics and data directories
+# dir_name <- here::here("simulated_data")
+# pic_path <- here::here("Results_figs")
+# if (!dir.exists(pic_path)) {
+#   dir.create(pic_path, recursive = TRUE)
+# }
+
 ```
 
 # Simulation 2 (new)
