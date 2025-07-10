@@ -41,7 +41,7 @@ source(here::here("functions", "player_and_lotteries.R"))
 source(here::here("functions", "analysis_functions.R"))
 # ggplot settings
 theme_set({
-  theme_bw()+    
+  theme_bw()+
   theme(
     legend.position = "bottom",
     legend.title = element_text(size = 17),
@@ -49,7 +49,7 @@ theme_set({
     axis.title = element_text(size = 16),
     axis.text.x = element_text(vjust = 0.5, hjust = 0.5),
     axis.text = element_text(size = 13),
-    strip.text= element_text(size = 12),
+    strip.text = element_text(size = 12),
     title = element_text(size = 18))
 })
 ```
@@ -91,7 +91,7 @@ utility_method_levels <-
             "Bisection","Bisection_fixbnd",
             "Bisection-Slider", "Bisection-Slider_fixbnd",
             "MOBS", "MOBS_fixbnd",
-             "ASA", "ASA_randInit",
+            "ASA", "ASA_randInit",
             "SimpBisection", "SimpBisection_randInit",
             "PEST", "PEST_randInit")
 
@@ -100,23 +100,24 @@ utility_method_levels <-
 ## Directories
 
 ```{r dir_params}
-dir_name <- here::here("/ASA_simulation_RDS")
-pic_path <- here::here("./figs")
-
-
 # pics and data directories
 # dir_name <- here::here("simulated_data")
-# pic_path <- here::here("Results_figs")
-# if (!dir.exists(pic_path)) {
-#   dir.create(pic_path, recursive = TRUE)
-# }
-
+dir_name <- here::here("simulation_Rmds", "ASA_simulation_RDS")
+pic_path <- here::here("Results_figs")
+if (!dir.exists(pic_path)) {
+  dir.create(pic_path, recursive = TRUE)
+}
 ```
 
-# Simulation 1 
+# Simulation 1
 
+Read files and preprocess data.
 ```{r bound2}
 file_name <- "Study1_df.RDS"
+
+# Print the file found for verification
+cat("Using simulation file:", file_name, "\n")
+
 fname <- file.path(dir_name, file_name)
 
 bound_df <- read_rds(fname) %>% 
@@ -183,8 +184,7 @@ cleaned_df <- bound_df %>%
 
 ## Utility Curve Plots
 
-The colored line segments represent the 95% CI of the observations. The black dashed line (and the hollow dots) shows the true values.
-
+Figure 1: The colored line segments represent the 95% CI of the observations. The black dashed line (and the hollow dots) shows the true values.
 
 ```{r, fig.height=7, fig.width=14}
 cleaned_df %>% 
@@ -221,11 +221,11 @@ cleaned_df %>%
   ) +
   labs(
     x = "Elicited x ",
-    y = "V(X)",
+    y = "v(x)",
     # title = "Value Curve",
     color = expression(phi),
     shape = expression(phi)
-    ) +
+  ) +
   facet_wrap(~ method, dir="v", ncol=6, nrow=2) +
   theme(
     axis.text.x = element_text(angle = 45, hjust = 0.6, vjust=0.6),
@@ -237,6 +237,8 @@ save_fig(pname, width = 14, height = 7, p_path = pic_path)
 ```
 
 ## Bias and RMSE
+
+This sections summarizes the bias and RMSE of the elicited values compared to the true values.
 
 ```{r summ_biasRMSE}
 df.bias_RMSE <- cleaned_df %>%
@@ -267,6 +269,56 @@ df.bias_RMSE <- cleaned_df %>%
 
 ### Bias
 
+Table (provide a criterion of unbiasedness)
+
+The heat map below shows the (absolute) bias-to-true-value ratio under different criteria.
+
+```{r, rows.print = 12, fig.height=7, fig.width=15}
+df.bias_prop <- df.bias_RMSE %>% 
+  filter(lambda == 2.25) %>% 
+  left_join(
+    y = true_df |> 
+      select(utility, lambda, true_value),
+    by = join_by(utility, lambda)
+  ) %>% 
+  mutate(
+    method_condition  = glue("{method}_{boundary_type}"),
+    bias_prop = (abs(bias)/abs(true_value))
+  ) %>% 
+  select(!c(RMSE, lambda))
+
+for (criterion in c(.01, .05, .10)){
+  .plt <- df.bias_prop %>% 
+    ggplot(aes(x = utility, y = factor(method_condition), fill = (bias_prop >= criterion)) ) +
+    geom_tile(color = "grey50") +
+    geom_text(
+      aes(label = sprintf("%.2f", bias_prop)),
+      size = 3.5, color = "darkblue"
+    ) +
+    scale_fill_manual(
+      values = c("FALSE" = "white", "TRUE" = "red2"),
+      labels = paste(c("≤", ">"), criterion),
+    ) +
+    facet_grid(
+      cols = vars(phi)
+    ) +
+    labs(
+      x = "Utility",
+      y = "Method",
+      fill = "Bias to True Value Ratio",
+      title = glue("Bias to True Value Ratio Classification (Criterion = {criterion})")
+    ) +
+    # theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.y = element_text(size = 12)
+          )
+  print(.plt)
+}
+
+```
+
+Figure 2
+
 ```{r bias_bnd, fig.height=7, fig.width=13}
 p.bias <- df.bias_RMSE %>% 
   filter(lambda == 2.25) %>% 
@@ -287,12 +339,10 @@ p.bias <- df.bias_RMSE %>%
       shape = boundary_type),
     size = 3) +
   facet_grid(rows = vars(phi),
-             cols = vars(method),
-             # scales = "free_y"
+             cols = vars(method)
              ) +
   scale_x_discrete(labels = latex_labels) +
   scale_color_discrete(
-    # values = c("fix_bnd" = "cyan4", "equal_exp" = "orange2"),
     labels = c("fix_bnd" = "Boundary Width = 5000",
                "equal_exp" = "Equal Expectation",
                "rand_init" = "Random Initial"),
@@ -304,28 +354,33 @@ p.bias <- df.bias_RMSE %>%
                "rand_init" = "Random Initial"),
     name = "Variant") +
   labs(x = expression(x["i"]),
-       y = "Bias",
-       # title = "Bias"
-       )+
+       y = "Bias"
+       ) +
   theme(
     strip.text= element_text(size = 15)
-    )
+  )
 
 pname <- "study1_bias.pdf"
 p.bias
-save_fig(pname, width = 14, height = 7, p_path = pic_path)
+save_fig(pname, width = 13, height = 7, p_path = pic_path)
+
+p.bias +
+  coord_cartesian(
+    ylim = c(-1500L, 1500L)
+  )
+
+pname <- "study1_bias_fix_y1500.pdf"
+save_fig(pname, width = 13, height = 7, p_path = pic_path)
+
 ```
 
 
-### Bias2 (Additional Analysis)
+#### Addional Analysis on Bias
 
 One may suspect that the difference it due to the specification of the value function.
 Hence we vary in $\lambda$ in the value function in this section.
 
--   3 levels: 0.5, 1, 2.25.
-
 -   Theree levels of $\lambda$ are specified: 0.5, 1, 2.25.
-
 
 ```{r bias_vary_lambda, fig.height=14, fig.width=14}
 df.tmp <- cleaned_df %>%
@@ -365,8 +420,7 @@ helper_plot <- function(df) {
     size = 3) +
   scale_color_brewer(palette = "Dark2")+
   facet_grid(rows = vars(phi),
-             cols = vars(method),
-             # scales = "free_y"
+             cols = vars(method)
              ) +
   ylim(-6000, 8000)+
   scale_x_discrete(labels = latex_labels) +
@@ -401,7 +455,7 @@ p <- p1 / p2 +
 p
 pname <- "study1_bias_different_Lambda.pdf"
 
-save_fig(pname, width = 14, height = 14)
+save_fig(pname, width = 14, height = 14, p_path = pic_path)
 ```
 
 
@@ -414,15 +468,16 @@ rm(p2)
 
 ### RMSE
 
+Table
 ```{r}
-df.bias_RMSE %>% 
-  filter(lambda == 2.25, method =="ASA")
+df.bias_RMSE %>%
+  filter(lambda == 2.25, method == "ASA")
 ```
 
-
+Figure 3
 ```{r RMSE_bnd, fig.height=7, fig.width=13}
-p.RMSE <- df.bias_RMSE %>% 
-  filter(lambda == 2.25) %>% 
+p.RMSE <- df.bias_RMSE %>%
+  filter(lambda == 2.25) %>%
   ggplot(aes(x = utility)) +
   geom_line(aes(
     x = utility,
@@ -441,11 +496,9 @@ p.RMSE <- df.bias_RMSE %>%
     size = 3) +
   facet_grid(rows = vars(phi),
              cols = vars(method),
-             # scales = "free_y"
              ) +
   scale_x_discrete(labels = latex_labels) +
   scale_color_discrete(
-    # values = c("fix_bnd" = "cyan4", "equal_exp" = "orange2"),
     labels = c("fix_bnd" = "Boundary Width = 5000",
                "equal_exp" = "Equal Expectation",
                "rand_init" = "Random Initial"),
@@ -457,49 +510,32 @@ p.RMSE <- df.bias_RMSE %>%
                "rand_init" = "Random Initial"),
     name = "Variant") +
   labs(x = expression(x["i"]),
-       y = "RMSE",
-       # title = "RMSE"
+       y = "RMSE"
        )+
   theme(
     strip.text= element_text(size = 15)
     )
 
 pname <- "study1_RMSE.pdf"
-save_fig(pname, width = 13, height = 7)
-```
+save_fig(pname, width = 13, height = 7, p_path = pic_path)
 
-
-
-## Bias+RMSE Combined
-
-```{r, fig.height=14, fig.width=14}
-p <- p.bias / p.RMSE +
-  plot_annotation(
-    title = 'Study1: Iterates Until Step Size < 5',
-    theme = theme(plot.title = element_text(size = 32, hjust = .5))) +
-  plot_layout(guides = 'collect') & 
-  theme(legend.position='bottom',
-        legend.text = element_text(size = 24),
-        legend.title = element_text(size = 26),
-        strip.text= element_text(size = 20),
-        axis.title.x = element_text(size = 20),
-        )
-
-pname <- "study1_biasRMSE.pdf"
-p
-save_fig(pname, width = 16, height = 16)
+p.RMSE +
+  coord_cartesian(
+    ylim = c(NA, 3000L)
+  )
+pname <- "study1_RMSE_fix_y3000.pdf"
+save_fig(pname, width = 13, height = 7, p_path = pic_path)
 
 ```
 
-
-## Step Count
+## Iteration Counts
 
 ```{r eval=FALSE, include=FALSE}
-len_df <- read_rds(fname) %>% 
+len_df <- read_rds(fname) %>%
   select(alpha:Nsim, ends_with("len")) %>%
   mutate(
     # method = str_replace(method_type, "_(randInit|fixbnd)$", ""),
-    method = gsub("Bisection_Slider","Bisection-Slider", method_type) |> 
+    method = gsub("Bisection_Slider", "Bisection-Slider", method_type) |> 
       factor(levels = utility_method_levels),
     scheme = 
       case_when(
@@ -510,44 +546,19 @@ len_df <- read_rds(fname) %>%
     .after = phi,
     .keep = "unused"
   )
-
-len_df %>% 
-  # group_by(phi, lambda,  method, scheme) %>% 
-  group_by(phi, lambda,  method) %>% 
-  filter(lambda ==2.25) %>% 
-  mutate(
-    mean_each_step = rowMeans(across(ends_with("len"))),
-    .keep = "unused"
-  ) %>%
-  summarise(
-    "Mean_Iteration_Number" = mean(mean_each_step) |> round(),
-    "Mean_Iteration_Number(SD)" = mean(mean_each_step) |> round(),
-    SD_Iteration_Number = sd(mean_each_step) |> round(2),
-    .groups = "drop"
-  ) %>% 
-  select(!lambda) %>%
-  group_by(phi) %>%
-  # arrange(desc(Mean_Iteration_Number), .by_group = TRUE)
-  arrange(method, .by_group = TRUE) %>% 
-  write_csv(
-    file = file.path(pic_path, "step.csv")
-  )
-
 ## Mean and SD
-
-len_df %>% 
-  # group_by(phi, lambda,  method, scheme) %>% 
+len_df %>%
   group_by(phi, lambda,  method) %>% 
-  filter(lambda ==2.25) %>% 
+  filter(lambda == 2.25) %>% 
   pivot_longer(
     cols = ends_with("len"),
     names_to = "x_points",
     values_to = "step"
-               ) %>% 
+               ) %>%
   summarise(
-    "Mean_Iteration_Number" = mean(step) |> round(),
-    # "Mean_Iteration_Number(SD)" = mean(mean_each_step) |> round(),
+    Mean_Iteration_Number = mean(step) |> round(),
     SD_Iteration_Number = sd(step) |> round(2),
+    mean_SD = glue("{Mean_Iteration_Number}({SD_Iteration_Number})"),
     .groups = "drop"
   ) %>% 
   select(!lambda) %>%
@@ -557,16 +568,13 @@ len_df %>%
   write_csv(
     file = file.path(pic_path, "step.csv")
   )
-
-
 ```
 
-# Inspect alternative determination rule for ASA
+## Inspect alternative termination rule for ASA
 
 -  Since step size < 5 may not be appropriate for ASA (at least 64 iterations to terminate).
 
 -  The `m-reversal-out-of-k` rule is applied. We extract cases where 6 reversals happen in last 8 trials as the final estimate, compute the final trial counts and the estimates.   
-
 
 ```{r}
 ASA_df <- read_rds(fname) %>% 
@@ -624,6 +632,8 @@ find_subvector <- function(vec, m, k, start.from = 1) {
         index = n
       ))  # No match found
 }
+
+# Truncated ASA sequences
 sliced_ASA <- ASA_df %>%
   filter(lambda == 2.25, grepl("^ASA.*", method)) %>%
   mutate(step = map(seq, diff),
@@ -639,14 +649,14 @@ sliced_ASA <- ASA_df %>%
     final_step_size = abs(value),
     # extract final est
     x_value = map_int(sliced_seq, \(x) x[length(x)]),
-    .keep = 'unused'
-  ) %>% 
+    .keep = "unused"
+  ) %>%
   left_join(true_df, by = join_by(alpha, beta, lambda, utility))
 ```
 
 ```{r}
 sliced_ASA %>%
-  group_by(phi, method) %>% 
+  group_by(phi, method) %>%
   summarise(mean_iteration_number = mean(sliced_N_iter))
 ```
 
@@ -673,7 +683,6 @@ sliced_ASA %>%
     . ~ phi
   ) +
   scale_x_continuous(
-    breaks = seq(0,200, 15)
+    breaks = seq(0, 200, 15)
   )
-    
 ```
