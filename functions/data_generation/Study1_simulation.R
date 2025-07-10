@@ -9,16 +9,18 @@ source(here::here("functions", "game_and_exp.R"))
 source(here::here("functions", "TO_exp.R"))
 
 # Paths -------------------------------------------------------------------
-dir_name <- here::here("simulation_Rmds", "ASA_simulation_RDS")
+dir_name <- here::here("simulated_data")
 file_name <- "Study1_df.RDS"
 fname <- file.path(dir_name, file_name)
 # Create a global log file
 script_dir <- dirname(rstudioapi::getSourceEditorContext()$path)
-log_file <- file.path(script_dir, "logs",
-                      paste0("Study1-simulation", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
-dir.create("logs", showWarnings = FALSE)
-write_process_log <- function(msg, show_console = TRUE) {
+log_dir <- file.path(script_dir, "logs")
+log_file <- file.path(log_dir, paste0("Study1-simulation", format(Sys.time(), "%Y%m%d_%H%M%S"), ".log"))
 
+# Create the logs directory inside the script's folder
+dir.create(log_dir, showWarnings = FALSE, recursive = TRUE)
+
+write_process_log <- function(msg, show_console = TRUE) {
   timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
   message <- paste0(timestamp, " - ", msg, "\n")
   cat(message, file = log_file, append = TRUE)

@@ -101,8 +101,7 @@ utility_method_levels <-
 
 ```{r dir_params}
 # pics and data directories
-# dir_name <- here::here("simulated_data")
-dir_name <- here::here("simulation_Rmds", "ASA_simulation_RDS")
+dir_name <- here::here("simulated_data")
 pic_path <- here::here("Results_figs")
 if (!dir.exists(pic_path)) {
   dir.create(pic_path, recursive = TRUE)
