@@ -4,12 +4,12 @@ library(purrr)
 library(stringr)
 
 # Modify the path
-source("../player_and_lotteries.R")
-source("../game_and_exp.R")
-source("../TO_exp.R")
+source(here::here("functions", "player_and_lotteries.R"))
+source(here::here("functions", "game_and_exp.R"))
+source(here::here("functions", "TO_exp.R"))
 
 # Paths -------------------------------------------------------------------
-dir_name <- "./simulation_Rmds/ASA_simulation_RDS"
+dir_name <- here::here("simulation_Rmds", "ASA_simulation_RDS")
 file_name <- "Study1_df.RDS"
 fname <- file.path(dir_name, file_name)
 # Create a global log file

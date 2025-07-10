@@ -1,4 +1,4 @@
-source("E:/Proj/Loss_Aversion_simu/functions/player_and_lotteries.R")
+source(here::here("functions", "player_and_lotteries.R"))
 
 param <- list("alpha"=.88, "beta"=.88, "lambda"=2.25, "wp"=.5, "wn"=.5)
 exp_param <- list(
