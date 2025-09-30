@@ -33,4 +33,4 @@ Loss_Aversion_simu/
 
 ## Notes:
 
-For the current version, the `functions/` codes are greatly modified (in order to include adaptive schemes for the bisection-based methods) and the results may not match the original paper. For the original code and synthetic data reproduction, please refer to the `Archive` branch of this repository.
+For the current version, the `functions/` codes are greatly modified (in order to include adaptive schemes for the bisection-based methods) and the results (synthetic data, figures) may not match the original paper perfectly. For the original code and synthetic data reproduction, please refer to the `Archive` branch of this repository.
