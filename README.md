@@ -1,8 +1,8 @@
 # R simulation For Loss aversion
 
-This repository contains simulation codes and results for comparing different elicitation methods for estimating indifference points and loss aversion.
+This repository contains simulation codes and results for comparing different elicitation methods for estimating indifference points and loss aversion. For a detailed description, please refer to [my thesis dissertation](https://doi.org/10.6342/NTU202501601).
 
-We follow the [Abdellaoui et al. (2016)](https://doi.org/10.1007/s11166-016-9234-y) paper, which proposed a non-parametric method to estimate loss aversion and indifference points as the benchmark to compare different choice-based elicitation methods. The methods we focus on are the *Bisection* method (which is used in the original paper), and some other psychophysical methods, such as *ASA* and *PEST*.
+We follow the [Abdellaoui et al. (2016)](https://doi.org/10.1007/s11166-016-9234-y) paper, which proposed a non-parametric method to estimate loss aversion and indifference points as the benchmark to compare different choice-based elicitation methods. The methods we focus on are the *Bisection* method (which is used in the original paper), and some other psychophysical methods, including *ASA*, *PEST* and *MOBS*.
 
 ## Structure
 
