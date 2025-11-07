@@ -81,8 +81,8 @@ experiment <- function(params,
         game$generate_lotteries(cur_task_idx, trial) # (-> Lottery class object)
       # Update lottery by player's choice
       player$input_choice(cur_lotteries,
-        slider = FALSE,
-        est_quant = cur_task_idx
+        use_slider = FALSE,
+        cur_task_idx = cur_task_idx
       )
       game$update_task_log(
         choice = cur_lotteries$result,
@@ -97,14 +97,14 @@ experiment <- function(params,
         break
       }
     }
-    # If slider, there's a final step
+    # If slider, there's an extra final step
     if (elicit_method == "Bisection-Slider") {
       cur_lotteries <-
         game$generate_lotteries(cur_task_idx, trial) # (->Lottery class object)
       # update lottery by player's choice
       player$input_choice(cur_lotteries,
-        slider = TRUE,
-        est_quant = cur_task_idx
+        use_slider = TRUE,
+        cur_task_idx = cur_task_idx
       )
       game$update_task_log(cur_lotteries$result,
         cur_task_idx,

@@ -6,9 +6,9 @@ library(R6)
 # `Player` 有 4 個 private attributes：`alpha`、`beta` 和 `lambda`、`phi`。
 # 有 2 個 private methods：
 #
-# + `choose()`：用`compute_prospects()` 算一對彩券分別的 prospects，再依softmax做選擇
-# + 若`slider`，則回傳理論值。
-# + `compute_prospects()`：根據效用函數算出該彩券的 prospect
+# + `choose()`：用`compute_prospect_value()` 算一對彩券分別的 CPT value，再依softmax做選擇
+# + 若`use_slider`，則回傳理論值。
+# + `compute_prospect_value()`：根據效用函數算出該彩券的 CPT value
 #
 # 當 A 和 B 的 prospects 相同時，player 會有 50% 選 A、50% 選 B。
 # 有 1 個 public method：`input_choice()`（把 player 的決策寫在 lotteries 上）。
@@ -24,15 +24,22 @@ Player <- R6Class(
     utility_function = NA,
     # Method
     choose = function(lotteries, utility_function,
-                      slider =  FALSE, ...) {
+                      use_slider =  FALSE, cur_task_idx = NULL, ...) {
       #> choose one of the lotteries depending on the players utility function
       #> Compute net utilities of the 2 lotteries
-      if (!slider) {
-        #NOT using slider, return choosen option
+
+      # Validate input
+      if (is.null(lotteries$A) || is.null(lotteries$B)) {
+        stop("Lotteries A and B must not be NULL")
+      }
+
+      if (!use_slider) {
+        # NOT using slider, return chosen option CPT value
         prospect.A <-
-          private$compute_prospects(lotteries$A, utility_function)
+          private$compute_prospect_value(lotteries$A, utility_function)
         prospect.B <-
-          private$compute_prospects(lotteries$B, utility_function)
+          private$compute_prospect_value(lotteries$B, utility_function)
+
         if (is.na(prospect.A)) {
           print(lotteries$A)
           stop("prospect.A error!")
@@ -57,12 +64,13 @@ Player <- R6Class(
 
       } else {
         # if using slider, return indifferent point
-        est_quant <- list(...)$est_quant
-        return(lotteries$find_optimal(params = private$params,
-                                      est_quant = est_quant)) #trial
+        lotteries$find_optimal(
+          params = private$params,
+          task_idx = cur_task_idx
+        ) #trial
       }
     },
-    compute_prospects = function(lottery, type = c("CRRA", "CARA")) {
+    compute_prospect_value = function(lottery, type = c("CRRA", "CARA")) {
       type <- match.arg(type)
       # Compute mixed prospects so that the player can evaluate the lottery
       # lottery <-  c(gain, loss) ,which is lotteries$A or lotteries$B
@@ -135,11 +143,15 @@ Player <- R6Class(
       private$utility_function <-
         match.arg(utility_function)
     },
-    input_choice = function(lotteries, slider = FALSE, ...) {
+    input_choice = function(lotteries, use_slider = FALSE, cur_task_idx = NULL, ...) {
       # Send player's choice to the game
-      est_quant <- list(...)$est_quant
       choice <-
-        private$choose(lotteries, private$utility_function, slider, est_quant = est_quant)
+        private$choose(
+          lotteries,
+          private$utility_function,
+          use_slider,
+          cur_task_idx = cur_task_idx
+        )
       lotteries$update_result(choice)
     }
   )
@@ -149,7 +161,7 @@ Player <- R6Class(
 
 # `Lotteries` 有 3 個 private attributes：`A`（彩券 A）、`B`（彩券 B）和 `result`（紀錄 player 的選擇）。
 # 同時也用了 active field 來簡化對 A、B 彩券的呼叫。
-# 有 1 個 private method：`new_lotteries()`，會根據目前的 est_quant
+# 有 1 個 private method：`new_lotteries()`，會根據目前的 cur_task_idx (current task index)
 #   產生相對應的兩張 lotteries。
 # 該 method 在創建物件時被呼叫。
 # 有 1 個 public method：`update_result()`，讓 player 把答案寫在 lotteries 上。
@@ -193,32 +205,49 @@ Lotteries <- R6Class(
     update_result = function(choice) {
       private$.result <- choice
     },
-    find_optimal = function(params, est_quant) {
+    find_optimal = function(params, task_idx) {
+      # Given player's parameters and trial index, find the true indifference point
+      # first calculate the utility of the target outcome
+      # then invert it to get the target dollar value
+
+      # Validate input parameters
+      required_params <- c("wp", "wn", "lambda", "alpha", "beta")
+      missing_params <- setdiff(required_params, names(params))
+      if (length(missing_params) > 0) {
+        stop("Missing required parameters: ", paste(missing_params, collapse = ", "))
+      }
+
       wp_50 <- params$wp
       wn_50 <- params$wn
       lambda <- params$lambda
       .alpha <- params$alpha
       .beta <- params$beta
 
-      if (est_quant == 1) {
+      if (task_idx == 1) {
         result <- -(utility(self$A[1], params, "CRRA") * (wp_50 / wn_50))
         result <- inv_utility(result, params)
-      } else if (est_quant %in% c(2, 3)) {
+      } else if (task_idx %in% c(2, 3)) {
         result <- wp_50 * utility(self$A[1], params, "CRRA") +
                   wn_50 * utility(self$A[2], params, "CRRA")
         result <- inv_utility(result, params)
       } else {
+        # task 4, 5, 6, 7, ...
+        # Utility of lottery A
         UA <- (wp_50 * utility(self$A[1], params, "CRRA")) +
               (wn_50 * utility(self$A[2], params, "CRRA"))
-        if (est_quant == 4 || ((est_quant > 5) && (est_quant %% 2 == 1))) {
+        if (task_idx == 4 || ((task_idx > 5) && (task_idx %% 2 == 1))) {
+          # find loss indifference point
+          # 4: L2; 7, 9...: x2_neg, x3_neg
           U_diff <- UA - (wp_50 * utility(self$B[1], params, "CRRA"))
           prob_weight <- wn_50
         } else {
+          # find gain indifference point
           U_diff <- UA - (wn_50 * utility(self$B[2], params, "CRRA"))
           prob_weight <- wp_50
         }
         result <- inv_utility(U_diff / prob_weight, params)
       }
+
       round(result)
     }
   )
@@ -318,15 +347,17 @@ find_optimal_params <- function(
     # x2pos
     opt <- c(L, x1pos, x1neg, L_2, G_2)
     names(opt) <- c("L", "x1pos", "x1neg", "L_2", "G_2")
-    i_value <-  (x_num - 3L) %/% 2
-    if (i_value >= 2) {
-      for (idx in 2:i_value){
+    # number of x_is
+    max_i_value <-  (x_num - 3L) %/% 2
+    if (max_i_value >= 2) {
+      for (idx in 2:max_i_value){
         last_xi_name <- paste0("x", idx - 1, c("pos", "neg"))
         xi_name <- paste0("x", idx, c("pos", "neg"))
-        last_x <-  opt[last_xi_name]
-        lott <- Lotteries$new(list(".A" = c(last_x[1], loss_1), ".B" = c(0, L_2)))
+        last_xi_value <-  opt[last_xi_name]
+        # find x_i_pos and x_i_neg true value
+        lott <- Lotteries$new(list(".A" = c(last_xi_value[1], loss_1), ".B" = c(0, L_2)))
         curr_xi_pos <- lott$find_optimal(params = params, ((2 * idx) - 1) + 5)
-        lott <- Lotteries$new(list(".A" = c(gain_1, last_x[2]), ".B" = c(G_2, 0)))
+        lott <- Lotteries$new(list(".A" = c(gain_1, last_xi_value[2]), ".B" = c(G_2, 0)))
         curr_xi_neg <- lott$find_optimal(params = params, ((2 * idx) + 5))
         opt <- c(opt, curr_xi_pos, curr_xi_neg)
         names(opt)[c((length(opt) - 1), length(opt))] <- xi_name

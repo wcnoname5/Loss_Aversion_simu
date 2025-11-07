@@ -56,6 +56,7 @@ Bisection_strategy <- R6Class(
         if (is.na(context$phi)) {
           new_stim <- choice |> as.integer()
         } else {
+          # TODO: change the sd value as additional parameter
           new_stim <- rnorm(1, mean = choice, sd = 20L) |> as.integer()
           new_stim <- pmax(pmin(new_stim, new_bound[2]), new_bound[1])
         }
@@ -76,7 +77,6 @@ Bisection_strategy <- R6Class(
       lower <- tail(bounds$low, 1)
       upper <- tail(bounds$up, 1)
       step <- abs(upper - lower) %/% 2  # Use abs() to ensure non-negative step
-      # cat("Task:", cur_task_idx, " Trial:", cur_trial, step, "\n")
       step
     },
 
@@ -109,7 +109,6 @@ Adaptive_bound_strategy <- R6Class(
       step <- private$step
       CheckGainBoundary <- context$CheckGainBoundary # logical
       bounds <- context$bounds_manager$get_bounds(cur_task_idx)
-      # cat("DEBUG Adaptive_bound_strategy update:\n")
       # cat("  choice:", choice, "last_stim:", last_stim, "\n")
       # cat("  cur_task_idx:", cur_task_idx, "cur_trial:", cur_trial, "\n")
       # cat("  CheckGainBoundary:", CheckGainBoundary, "\n")
@@ -145,7 +144,6 @@ Adaptive_bound_strategy <- R6Class(
           new_stim <- last_stim - step
         }
       }
-
       # cat("  new_stim:", new_stim, "EndSearching:", private$EndSearching, "\n")
 
       # Remove the unconditional bounds update that was causing the problem
@@ -177,88 +175,102 @@ MOBS_strategy <- R6Class(
   "MOBSStrategy",
   inherit = elicit_methods,
   private = list(
-    # Only store current tops and their history
-    low_stack_top = NA,
-    high_stack_top = NA,
+    # Maintain at most 3-level stacks (most recent at end)
+    low_stack = c(),
+    high_stack = c(),
+    max_stack_depth = 3L,
+    # Full history for tracking
     low_stack_history = c(),
     high_stack_history = c(),
     # Choice tracking for consistency checking - stimulus -> choice mapping
     stimulus_choice_map = list(),
     last_choice = NA,
-    consis_check = FALSE,
-    # Store previous top values for regression
-    regression_low_top = NA,
-    regression_high_top = NA
+    consis_check = FALSE
   ),
   public = list(
     initialize = function() {
       super$initialize("MOBS")
     },
+    # Update next stimulus based on choice and last stimulus
     update = function(choice, last_stim, cur_task_idx, cur_trial, context) {
+      # Parameters for quick access
       target_option <- ifelse(cur_task_idx == 1, "A", "B")
-      # cat("DEBUG MOBS_strategy update:\n")
-      # cat("  choice:", choice, "last_stim:", last_stim, "\n")
-      # cat("  cur_task_idx:", cur_task_idx, "cur_trial:", cur_trial, "\n")
+      # Boundaries for currest task
+      bounds <- context$bounds_manager$get_bounds(cur_task_idx)
       # Initialize on first trial
       if (cur_trial == 1) {
-        bounds <- context$bounds_manager$get_bounds(cur_task_idx)
-        cat("  MOBS first trial bounds: low =", bounds$low, "up =", bounds$up, "\n")
-        private$low_stack_top <- bounds$low[1]
-        private$high_stack_top <- bounds$up[1]
-        private$regression_low_top <- bounds$low[1]
-        private$regression_high_top <- bounds$up[1]
+        # cat("  MOBS first trial bounds: low =", bounds$low, "up =", bounds$up, "\n")
+        # Add initial elements (boundaries) to stacks
+        private$low_stack <- bounds$low[1]
+        private$high_stack <- bounds$up[1]
         private$stimulus_choice_map <- list()
       } else {
         # Not first trial for MOBS, but might be first time MOBS is called
-        if (is.na(private$low_stack_top) || is.na(private$high_stack_top)) {
+        # This can happen in Adaptive Boundary strategy
+        if (length(private$low_stack) == 0 || length(private$high_stack) == 0) {
           # MOBS is taking over from another strategy, need to initialize from current bounds
-          bounds <- context$bounds_manager$get_bounds(cur_task_idx)
-          # cat("  MOBS taking over, bounds: low =", bounds$low, "up =", bounds$up, "\n")
-          private$low_stack_top <- tail(bounds$low, 1)  # Use latest bounds
-          private$high_stack_top <- tail(bounds$up, 1)  # Use latest bounds
-          private$regression_low_top <- tail(bounds$low, 1)
-          private$regression_high_top <- tail(bounds$up, 1)
+          private$low_stack <- tail(bounds$low, 1)  # Use latest bounds
+          private$high_stack <- tail(bounds$up, 1)  # Use latest bounds
           private$stimulus_choice_map <- list()
         }
       }
-      cat("  MOBS stack tops: low =", private$low_stack_top, "high =", private$high_stack_top, "\n")
+
+      # Get current stack tops (latest element)
+      low_stack_top <- tail(private$low_stack, 1)
+      high_stack_top <- tail(private$high_stack, 1)
 
       # Calculate midpoint for current stimulus
-      current_midpoint <- (private$low_stack_top + private$high_stack_top) %/% 2
-      # cat("  current_midpoint:", current_midpoint, "\n")
+      current_midpoint <- (low_stack_top + high_stack_top) %/% 2
+
       if (private$consis_check) {
         # Handle consistency check phase
-        # Check if current choice is inconsistent with previous choice for same stimulus
+        # Check if current choice is inconsistent with previous choice for the same stimulus
         stim_key <- as.character(last_stim)
         previous_choice_for_stim <- private$stimulus_choice_map[[stim_key]]
         inconsistent <- !is.null(previous_choice_for_stim) && (previous_choice_for_stim != choice)
 
         if (inconsistent) {
-          # Regression: restore previous top values
+          # Inconsistency detected - pop from the appropriate stack (Regression)
           if (choice == target_option) {
-            private$low_stack_top <- private$regression_low_top
+            # Pop from high stack (remove last element)
+            if (length(private$high_stack) > 1) {
+              private$high_stack <- private$high_stack[-length(private$high_stack)]
+            } else {
+              # If popping would leave stack empty, replace with initial bound
+              private$high_stack <- bounds$up[1]  # Use initial upper bound
+            }
           } else {
-            private$high_stack_top <- private$regression_high_top
+            # Pop from low stack (remove last element)
+            if (length(private$low_stack) > 1) {
+              private$low_stack <- private$low_stack[-length(private$low_stack)]
+            } else {
+              # If popping would leave stack empty, replace with initial bound
+              private$low_stack <- bounds$low[1]  # Use initial lower bound
+            }
           }
         }
         # Reset consistency check
         private$consis_check <- FALSE
-        # Calculate next stimulus after potential regression
-        new_stim <- (private$low_stack_top + private$high_stack_top) %/% 2
+        # Calculate next stimulus after potential popping
+        new_stim <- (tail(private$low_stack, 1) + tail(private$high_stack, 1)) %/% 2
+
       } else {
         # Normal update phase
-        # Store current tops for potential regression
-        private$regression_low_top <- private$low_stack_top
-        private$regression_high_top <- private$high_stack_top
 
         # Update stack tops based on choice
         if (choice == target_option) {
-          # Target option chosen - update high stack top
-          private$high_stack_top <- current_midpoint
+          # Target option chosen - push to high stack
+          private$high_stack <- c(private$high_stack, current_midpoint)
+          if (length(private$high_stack) > private$max_stack_depth) {
+            private$high_stack <- tail(private$high_stack, private$max_stack_depth)
+          }
           private$high_stack_history <- c(private$high_stack_history, current_midpoint)
         } else {
-          # Non-target option chosen - update low stack top
-          private$low_stack_top <- current_midpoint
+          # Non-target option chosen - push to low stack
+          private$low_stack <- c(private$low_stack, current_midpoint)
+          if (length(private$low_stack) > private$max_stack_depth) {
+            private$low_stack <- tail(private$low_stack, private$max_stack_depth)
+          }
           private$low_stack_history <- c(private$low_stack_history, current_midpoint)
         }
 
@@ -269,13 +281,13 @@ MOBS_strategy <- R6Class(
         # Calculate next stimulus
         if (!private$consis_check) {
           # Normal case
-          new_stim <- (private$low_stack_top + private$high_stack_top) %/% 2
+          new_stim <- (tail(private$low_stack, 1) + tail(private$high_stack, 1)) %/% 2
         } else {
           # Consistency check - use stack top directly
           if (choice == target_option) {
-            new_stim <- private$low_stack_top
+            new_stim <- tail(private$low_stack, 1)
           } else {
-            new_stim <- private$high_stack_top
+            new_stim <- tail(private$high_stack, 1)
           }
         }
       }
@@ -286,41 +298,67 @@ MOBS_strategy <- R6Class(
 
       # Update choice history
       private$last_choice <- choice
-      # Update bounds manager with current stack tops
+       # Update bounds manager with current stack tops (latest elements)
       context$bounds_manager$update_bounds(
         cur_task_idx,
-        private$low_stack_top, private$high_stack_top
+        tail(private$low_stack, 1),
+        tail(private$high_stack, 1)
       )
       # Return new stimulus
       new_stim
     },
 
     get_step = function(cur_task_idx, cur_trial, context) {
-      if (any(is.na(private$low_stack_top), is.na(private$high_stack_top))) {
-        # If stack tops are not initialized, get bounds from bounds manager
+      if (length(private$low_stack) == 0 || length(private$high_stack) == 0) {
+        # If stacks are not initialized, get bounds from bounds manager
         bounds <- context$bounds_manager$get_bounds(cur_task_idx)
         step <- abs(bounds$up[1] - bounds$low[1]) %/% 2
       } else {
-        step <- abs(private$high_stack_top - private$low_stack_top) %/% 2
+        # Use latest stack tops
+        low_top <- tail(private$low_stack, 1)
+        high_top <- tail(private$high_stack, 1)
+        step <- abs(high_top - low_top) %/% 2
       }
-      cat("  MOBS_strategy get_step() =", step, "\n")
+      if (cur_trial == 0) {
+        cat("  Current Task Index:", cur_task_idx, ", Current Trial:", cur_trial, "\n")
+        cat("  Current Bounds:\n")
+        print(bounds)
+      } 
+
       if (is.na(step) || step <= 0) {
+        cat("DEBUG MOBS_strategy$get_step:\n")
+
+        cat("  Current Task Index:", cur_task_idx, "\n")
+        cat("  Current Trial:", cur_trial, "\n")
+        # cat("  Current Stack Tops (Low, High):", low_top, high_top, "\n")
+        cat("  Current Step:", step, "\n")
         # If step is NA or negative, return Inf to avoid errors
-        if (any(is.na(private$low_stack_top), is.na(private$high_stack_top))) {
+        if (length(private$low_stack) == 0 || length(private$high_stack) == 0) {
           cat("Bounds, up:", bounds$up[1], "low:", bounds$low[1], "\n")
         } else {
-          cat("Bounds, up:", private$high_stack_top, "low:", private$low_stack_top, "\n")
+          cat("Bounds, up:", tail(private$high_stack, 1), "low:", tail(private$low_stack, 1), "\n")
         }
       }
       step
     },
 
-    # Get current stack tops
+    # Get current stack tops (latest elements)
     get_current_bounds = function() {
-      list(low = private$low_stack_top, high = private$high_stack_top)
+      list(
+        low = if (length(private$low_stack) > 0) tail(private$low_stack, 1) else NA,
+        high = if (length(private$high_stack) > 0) tail(private$high_stack, 1) else NA
+      )
+    },
+    
+    # Get full stacks (for debugging/analysis)
+    get_current_stacks = function() {
+      list(
+        low_stack = private$low_stack,
+        high_stack = private$high_stack
+      )
     },
 
-    # Get stack histories
+    # Get stack histories  (full history of all pushes)
     get_stack_histories = function() {
       list(
         low_history = private$low_stack_history,
@@ -329,14 +367,12 @@ MOBS_strategy <- R6Class(
     },
 
     reset = function() {
-      private$low_stack_top <- NA
-      private$high_stack_top <- NA
+      private$low_stack <- c()
+      private$high_stack <- c()
       private$low_stack_history <- c()
       private$high_stack_history <- c()
       private$last_choice <- NA
       private$consis_check <- FALSE
-      private$regression_low_top <- NA
-      private$regression_high_top <- NA
       private$stimulus_choice_map <- list()
     },
     init_bounds = function(
@@ -474,17 +510,39 @@ ASA_strategy <- R6Class(
   private = list(
     last_choice = NA,
     m_shift = 0L,
+    c_rule = "", # does the ASA_c remain constant thouhgout the experiment
     ASA_c = 640L,
     cur_step = 320L
   ),
   public = list(
     initialize = function(step_size = 320L) {
       super$initialize("ASA")
-      private$ASA_c <- step_size * 2L
+      # Determine first_step on first trial
+      if (is.null(step_size) || identical(step_size, "Auto")) {
+        # Rule: derive from initial stimulus (like SimpBisection)
+        private$c_rule <- "Auto"
+        # Initialize with abitrary value; will be updated on first trial
+        private$ASA_c <- 660L
+        step_size <- private$ASA_c %/% 2L
+      } else if (is.character(step_size)) {
+        # Can handling other string-based rules here
+        stop("Unknown step_size rule: ", step_size)
+      } else {
+        # Numeric step_size (existing behavior)
+        private$c_rule <- "Constant"
+        private$ASA_c <- step_size * 2L
+      }
       private$cur_step <- step_size
     },
 
     update = function(choice, last_stim, cur_task_idx, cur_trial, context) {
+      if (identical(private$c_rule, "Auto") && cur_trial == 1) {
+        # Set ASA_c based on initial stimulus
+        private$ASA_c <- context$task_logger$get_log(cur_task_idx)[1] |>
+          abs()
+        private$cur_step <- private$ASA_c %/% 2L
+      }
+
       Zn <- ifelse(cur_task_idx == 1, as.numeric(choice == "A"), as.numeric(choice == "B"))
 
       late_phase_trial <- context$late_phase_param$late_phase_trial %||% 1L
@@ -514,8 +572,13 @@ ASA_strategy <- R6Class(
     },
 
     reset = function() {
-      private$cur_step <- 320L
-      private$ASA_c <- 640L
+      private$ASA_c <- switch(private$c_rule,
+        # follows SimpBisection initialization
+        "Auto" = 660L,
+        "Constant" = private$ASA_c,
+        stop("Unknown c_rule: ", private$c_rule)
+      )
+      private$cur_step <- private$ASA_c %/% 2L
       private$m_shift <- 0L
       private$last_choice <- NA
     }
@@ -535,7 +598,9 @@ bounds_manager <- R6Class(
         lapply(seq_len(n_est),
           function(x) list(up = c(numeric()), low = c(numeric()))
         )
-    },    init_bounds = function(
+    },
+    # Initialize bounds for all tasks
+    init_bounds = function(
       init_values,
       targets,
       bound_scheme = NULL
@@ -556,7 +621,8 @@ bounds_manager <- R6Class(
       private$bound_hist$x1pos[["up"]] <- init_values[["G"]]
       private$bound_hist$x1pos[["low"]] <- 0L
       private$bound_hist$x1neg[["up"]] <- 0L
-    },    # Get the bound history for a specific task index
+    },
+    # Get the bound history for a specific task index
     get_bounds = function(task_idx) {
       # cat("DEBUG BoundsManager get_bounds for task", task_idx, ":\n")
       # cat("  low:", private$bound_hist[[task_idx]][["low"]], "\n")
@@ -565,6 +631,7 @@ bounds_manager <- R6Class(
     },
 
     update_bounds = function(task_idx, lower = NULL, upper = NULL) {
+      # Update the bound history for a specific task index
       if (!is.null(lower)) {
         private$bound_hist[[task_idx]][["low"]] <- c(private$bound_hist[[task_idx]][["low"]], lower)
       }
@@ -1095,14 +1162,12 @@ Game <- R6Class(
         # (0, .5; l_1) vs (x1+, .5; "L2")
         cur_vec <- self$get_task_log()[["x1pos"]]
         x1pos <- tail(cur_vec, 1)
-        # cat("  x1pos from previous task:", x1pos, "\n")
         .A <- c(0L, loss_1)
         .B <- c(x1pos, self$get_task_log()[["L2"]][cur_trial])
       } else if (cur_est_pt == "G2") {
         # (g_1, .5; 0) vs ("G2", .5;  x1-)
         cur_vec <- self$get_task_log()[["x1neg"]]
         x1neg <- tail(cur_vec, 1)
-        # cat("  x1neg from previous task:", x1neg, "\n")
         .A <- c(gain_1, 0L)
         .B <- c(self$get_task_log()[["G2"]][cur_trial], x1neg)
       } else if (cur_task_idx %in% x_pos_seq) {
@@ -1117,7 +1182,6 @@ Game <- R6Class(
         # L_2
         L2_vec <- self$get_task_log()[["L2"]]
         L2 <- tail(L2_vec, 1)
-        # cat("  last_xipos:", last_xipos, "L2:", L2, "\n")
         # x_i^+: (x_{i-1}+, .5; l_1) vs ("x_i+", .5; L_2)
         .A <- c(last_xipos, loss_1)
         .B <- c(self$get_task_log()[[cur_xi_name]][cur_trial], L2)
@@ -1132,15 +1196,11 @@ Game <- R6Class(
         # L_2
         G2_vec <- self$get_task_log()[["G2"]]
         G2 <- tail(G2_vec, 1)
-        # cat("  last_xineg:", last_xineg, "G2:", G2, "\n")
         # x_i^-: (g_1, .5; x_{i-1}-) vs (G_2, .5; "x_i-")
         .A <- c(gain_1, last_xineg)
         .B <- c(G2, self$get_task_log()[[cur_xi_name]][cur_trial])
       }
 
-      # DEBUG: Print lottery values before validation
-      # cat("  .A:", paste(.A, collapse = ", "), "\n")
-      # cat("  .B:", paste(.B, collapse = ", "), "\n")
 
       lottery_values <- list(".A" = .A, ".B" = .B)
       if (anyNA(.A) | anyNA(.B) || !is.numeric(.A) || !is.numeric(.B)) {
@@ -1206,11 +1266,12 @@ Game <- R6Class(
       cur_stim <- private$task_logger$get_log(cur_est_pt)[cur_trial]      # Update using strategy
       new_value <-
         current_strategy$update(choice, cur_stim, cur_task_idx, cur_trial, context)
-      # cat("DEBUG update_task_log: cur_task_idx =", cur_task_idx, "cur_trial =", cur_trial, "choice", choice, "from", class(current_strategy)[1],"\n")
-      # cat("  cur_Stim =", cur_stim, "new_Stim =", new_value ,  "\n")      # Get step size to determine if we should continue
       step <- current_strategy$get_step(cur_task_idx, cur_trial, context)
 
-      # cat("   step =", step, "diff=", abs(new_value - cur_stim), "min_step =", private$min_step, "\n")
+      # DEBUG: Print update information
+        # cat("DEBUG update_task_log: cur_task_idx =", cur_task_idx, "cur_trial =", cur_trial, "choice", choice, "from", class(current_strategy)[1],"\n")
+        # cat("  cur_Stim =", cur_stim, "new_Stim =", new_value ,  "\n")      # Get step size to determine if we should continue
+        # cat("   step =", step, "diff=", abs(new_value - cur_stim), "min_step =", private$min_step, "\n")
 
       if (!is.numeric(step) || is.na(step)) {
         print(cur_task_idx)
@@ -1323,6 +1384,9 @@ Game <- R6Class(
     # Other public methods
     reset_step = function() private$strategy$reset(),
     get_current_step = function(cur_task_idx, cur_trial) {
+      if (cur_trial < 1L) {
+        return(Inf)
+      }
       # Use the same strategy selection logic as update_task_log
       IsLatePhase <- private$late_phase_param$isLatePhase %||% FALSE
       IsAdaptivePhase <- private$late_phase_param$isAdaptivePhase %||% FALSE
@@ -1357,11 +1421,19 @@ Game <- R6Class(
         bounds_manager = private$bounds_manager,
         late_phase_param = private$late_phase_param
       )
+      if (cur_trial == 0) {
+        cat("Task Index:", cur_task_idx, "Getting step for trial 0 using strategy: ")
+        cat(current_strategy$name, "\n")
+      }
       step <- current_strategy$get_step(cur_task_idx, cur_trial, context)
       if (!is.numeric(step) || is.na(step)) {
         print("Step is not numeric or is NA. Printing stack trace:")
         print(sys.calls())
-        stop("Step must be numeric and not NA.")
+        print(private$late_phase_param)
+        stop("Task Index:", cur_task_idx,
+            "  Getting step for trial 0 using strategy: ", current_strategy$name,
+            " Step value:", step, "\n",
+            "Step must be numeric and not NA.")
       } else if (step < 0L) {
         stop(paste("Step must be a non-negative integer. Current step =", step))
       } else {
