@@ -20,9 +20,17 @@ csl: "apa.csl"
 ---
 
 ```{r setup, include=FALSE}
+# plot parameters
+BIAS_BOUND <- c(-1500L, 1500L)
+RMSE_BOUND <- c(NA, 3000L)
+PIC_HEIGHT <- 7
+PIC_WIDTH <- 13
+
 knitr::opts_chunk$set(
 	echo = TRUE,
 	fig.align = "center",
+	fig.height = PIC_HEIGHT,
+	fig.width = PIC_WIDTH,
 	warning = FALSE,
 	rows.print=11,
 	paged.print=TRUE
@@ -84,16 +92,29 @@ names(phi_vec) <- c("large", "medium", "small")
 
 # methods
 
-method_levels <- 
-  c("Bisection", "Bisection-Slider", "MOBS", "ASA","SimpBisection", "PEST")
-utility_method_levels <- 
+method_levels <-
+  c("Bisection", "Bisection-Slider", "MOBS", "ASA", "PEST", "SimpBisection")
+utility_method_levels <-
           c(
             "Bisection","Bisection_fixbnd",
             "Bisection-Slider", "Bisection-Slider_fixbnd",
             "MOBS", "MOBS_fixbnd",
             "ASA", "ASA_randInit",
-            "SimpBisection", "SimpBisection_randInit",
-            "PEST", "PEST_randInit")
+            "PEST", "PEST_randInit",
+            "SimpBisection", "SimpBisection_randInit"
+            )
+
+method_labels <- 
+  c("BiM", "BiM-S", "MOBS", "ASA", "PEST", "HaB")
+utility_method_labels <- 
+          c(
+            "BiM","BiM_fixbnd",
+            "BiM-S", "BiM-S_fixbnd",
+            "MOBS", "MOBS_fixbnd",
+            "ASA", "ASA_randInit",
+            "PEST", "PEST_randInit",
+            "HaB", "HaB_randInit"
+            )
 
 ```
 
@@ -128,7 +149,7 @@ bound_df <- read_rds(fname) %>%
          matches("^x[1-9](pos|neg)_est")) %>% 
   rename_with(\(x) str_remove(x, "_est")) %>% 
   mutate(
-    method = sub("Bisection_Slider", "Bisection-Slider", method)
+    method = sub("Bisection_Slider", "Bisection-Slider", method),
   ) %>% 
   add_column(x0 = 0L, .before = "x1pos")
 
@@ -194,7 +215,7 @@ cleaned_df %>%
   filter(lambda == 2.25 & phi != "small" ) %>%
   mutate(
     method =
-      factor(method, levels = utility_method_levels)
+      factor(method, levels = utility_method_levels, labels = utility_method_labels)
   ) %>%
   group_by(phi) %>% 
   ggplot(aes(y = utility)) +
@@ -223,9 +244,11 @@ cleaned_df %>%
     linewidth = 1.1, size = 0.6, alpha=.8
   ) +
   labs(x = "Elicited x ",
-       y = "V(X)",
-       title = "Value Curve",
-       color = "phi") +
+       y = "v(X)",
+       # title = "Value Curve",
+       color = expression(phi),
+       shape = expression(phi)
+       ) +
   facet_wrap(~ method, dir="v", ncol=6, nrow=2) +
   theme(
     axis.text.x = element_text(angle = 45, hjust = 0.6, vjust=0.6),
@@ -233,7 +256,7 @@ cleaned_df %>%
     )
 
 pname <- "study1_utility_curve.pdf"
-save_fig(pname, width = 14, height = 7, p_path = pic_path)
+save_fig(pname, width = 14, height = PIC_HEIGHT, p_path = pic_path)
 ```
 
 ## Bias and RMSE
@@ -252,7 +275,7 @@ df.bias_RMSE <- cleaned_df %>%
     method = 
       str_replace(method, "_(randInit|fixbnd)$", "") |>
       factor(
-        levels = method_levels
+        levels = method_levels, labels = method_labels
       )
   ) %>% 
   group_by(phi, method, boundary_type, utility, lambda) %>% 
@@ -268,6 +291,55 @@ df.bias_RMSE <- cleaned_df %>%
 ```
 
 ### Bias
+
+Table (provide a criterion of unbiasedness)
+
+The heat map below shows the (absolute) bias-to-true-value ratio under different criteria.
+
+```{r, rows.print = 12, fig.height=7, fig.width=15}
+df.bias_prop <- df.bias_RMSE %>% 
+  filter(lambda == 2.25) %>% 
+  left_join(
+    y = true_df |> 
+      select(utility, lambda, true_value),
+    by = join_by(utility, lambda)
+  ) %>% 
+  mutate(
+    method_condition  = glue("{method}_{boundary_type}"),
+    bias_prop = (abs(bias)/abs(true_value))
+  ) %>% 
+  select(!c(RMSE, lambda))
+
+for (criterion in c(.01, .05, .10)){
+  .plt <- df.bias_prop %>% 
+    ggplot(aes(x = utility, y = factor(method_condition), fill = (bias_prop >= criterion)) ) +
+    geom_tile(color = "grey50") +
+    geom_text(
+      aes(label = sprintf("%.2f", bias_prop)),
+      size = 3.5, color = "darkblue"
+    ) +
+    scale_fill_manual(
+      values = c("FALSE" = "white", "TRUE" = "red2"),
+      labels = paste(c("≤", ">"), criterion),
+    ) +
+    facet_grid(
+      cols = vars(phi)
+    ) +
+    labs(
+      x = "Utility",
+      y = "Method",
+      fill = "Bias to True Value Ratio",
+      title = glue("Bias to True Value Ratio Classification (Criterion = {criterion})")
+    ) +
+    # theme_minimal()+
+    theme(legend.position = "bottom",
+          axis.text.y = element_text(size = 12)
+          )
+  print(.plt)
+}
+
+```
+
 
 ```{r bias_bnd, fig.height=7, fig.width=13}
 p.bias <- df.bias_RMSE %>% 
@@ -307,14 +379,16 @@ p.bias <- df.bias_RMSE %>%
     name = "Variant") +
   labs(x = expression(x["i"]),
        y = "Bias",
-       title = "Bias")+
+       # title = "Bias"
+       )+
   theme(
     strip.text= element_text(size = 15)
-    )
+    ) +
+  coord_cartesian(ylim = BIAS_BOUND)
 
 pname <- "study1_bias.pdf"
 p.bias
-save_fig(pname, width = 13, height = 7, p_path = pic_path)
+save_fig(pname, width = PIC_WIDTH, height = PIC_HEIGHT, p_path = pic_path)
 ```
 
 
@@ -402,19 +476,11 @@ pname <- "study1_bias_different_Lambda.pdf"
 save_fig(pname, width = 14, height = 14, p_path = pic_path)
 ```
 
-
-```{r rm, include=FALSE}
-rm(df.tmp)
-rm(p1)
-rm(p2)
-```
-
-
 ### RMSE
 
 ```{r}
 df.bias_RMSE %>% 
-  filter(lambda == 2.25, method =="ASA")
+  filter(phi == "medium", method %in% c("BiM", "BiM-S", "MOBS"), lambda==2.25, utility ==-4)
 ```
 
 
@@ -456,13 +522,15 @@ p.RMSE <- df.bias_RMSE %>%
     name = "Variant") +
   labs(x = expression(x["i"]),
        y = "RMSE",
-       title = "RMSE")+
+       # title = "RMSE"
+       )+
   theme(
     strip.text= element_text(size = 15)
-    )
-
+    ) +
+  coord_cartesian(ylim = RMSE_BOUND)
+p.RMSE
 pname <- "study1_RMSE.pdf"
-save_fig(pname, width = 13, height = 7, p_path = pic_path)
+save_fig(pname, width = PIC_WIDTH, height = PIC_HEIGHT, p_path = pic_path)
 ```
 
 
@@ -490,13 +558,16 @@ save_fig(pname, width = 16, height = 16, p_path = pic_path)
 
 ## Iteration Counts
 
-```{r eval=FALSE, include=FALSE}
+```{r, rows.print = 20}
 len_df <- read_rds(fname) %>% 
   select(alpha:Nsim, ends_with("len")) %>%
   mutate(
     # method = str_replace(method_type, "_(randInit|fixbnd)$", ""),
     method = gsub("Bisection_Slider","Bisection-Slider", method_type) |> 
-      factor(levels = utility_method_levels),
+      factor(
+        levels = utility_method_levels,
+        labels = utility_method_labels
+      ),
     scheme = 
       case_when(
         grepl(".*_fixbnd$", method_type) ~ "Fixed Boundary Width",
@@ -507,26 +578,34 @@ len_df <- read_rds(fname) %>%
     .keep = "unused"
   )
 
-len_df %>% 
-  # group_by(phi, lambda,  method, scheme) %>% 
+len_df <- len_df %>% 
   group_by(phi, lambda,  method) %>% 
-  filter(lambda ==2.25) %>% 
-  mutate(
-    mean_each_step = rowMeans(across(ends_with("len"))),
-    .keep = "unused"
+  filter(lambda == 2.25) %>% 
+  pivot_longer(
+    cols = ends_with("len"),
+    names_to = "x_points",
+    values_to = "step"
   ) %>%
   summarise(
-    Mean_Iteration_Number = mean(mean_each_step) |> round(),
+    Mean_Iteration_Number = mean(step) |> round(),
+    SD_Iteration_Number = sd(step) |> round(2),
     .groups = "drop"
+  ) %>% 
+  mutate(
+    mean_SD = glue("{Mean_Iteration_Number}({SD_Iteration_Number})"),
+    .keep = "unused"
   ) %>% 
   select(!lambda) %>%
   group_by(phi) %>%
-  # arrange(desc(Mean_Iteration_Number), .by_group = TRUE)
-  arrange(method, .by_group = TRUE) %>% 
-  write_csv(
-    file = file.path(pic_path, "step.csv")
-  )
-
+    # arrange(desc(Mean_Iteration_Number), .by_group = TRUE)
+  arrange(method, .by_group = TRUE)
+len_df
+if (!file.exists("step.csv")) {
+  len_df %>% 
+    write_csv(
+      file = file.path(pic_path, "step.csv")
+    )
+}
 ```
 
 # Inspect alternative termination rule for ASA
@@ -682,7 +761,7 @@ sliced_ASA.biasRMSE <- sliced_ASA.biasRMSE %>%
   )
 ```
 
-```{r}
+```{r fig.height=PIC_HEIGHT, fig.width=PIC_WIDTH}
 sliced_ASA.biasRMSE %>% 
   filter(!grepl("^(Bisection|MOBS)", method)) %>% 
   ggplot(aes(x = utility)) +
@@ -767,39 +846,4 @@ sliced_ASA.biasRMSE %>%
   theme(
     strip.text= element_text(size = 15)
     )
-```
-
-
-# Additional Analysis: Loss aversion
-
-Although it is possible to estimate the loss aversion coefficient from the elicited values, we did not procced it.
-
-## Preprocess
-
-```{r true_LA, eval=FALSE, include=FALSE}
-# compute True LA coef. values
-trueLA_df <- bound_df %>% 
-  select(!data) %>% 
-  mutate(KW = - truev_x1pos / truev_x1neg) %>% 
-  pivot_longer(cols = matches(".*[1-9][pos|neg]"),
-                 names_to = c("trial", "type"),
-                 names_pattern = "x(\\d)(.*)",
-                 values_to = "value") %>%
-  mutate(
-    trial = as.integer(trial),
-    type = ifelse(type == "pos", "gain", "loss")  # Assign gain/loss
-  ) %>% 
-  pivot_wider(names_from = type, values_from = value) %>%
-  nest(data = c(trial, gain, loss))
-
-trueLA_df <- trueLA_df %>% 
-  mutate(
-    KT = map(data, ~KT2(.x)),
-    .keep = "unused"
-    ) %>% 
-  unnest_wider(KT, names_sep = "_") %>% 
-  pivot_longer(cols = KW:KT_median,
-               names_to = "LA_type",
-               values_to = "true_LA_est") %>% 
-  rename(true_KT_classification = "KT_classification")
 ```

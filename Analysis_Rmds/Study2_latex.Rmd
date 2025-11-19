@@ -20,9 +20,17 @@ csl: "apa.csl"
 ---
 
 ```{r setup, include=FALSE}
+# plot parameters
+BIAS_BOUND <- c(-1500L, 1500L)
+RMSE_BOUND <- c(NA, 3000L)
+PIC_HEIGHT <- 7
+PIC_WIDTH <- 13
+
 knitr::opts_chunk$set(
 	echo = TRUE,
 	fig.align = "center",
+	fig.height = PIC_HEIGHT,
+	fig.width = PIC_WIDTH,
 	warning = FALSE,
 	rows.print=11,
 	paged.print=TRUE
@@ -55,33 +63,7 @@ theme_set({
 })
 ```
 
-
-# Introduction
-
--   回去翻過去 EDP 的實驗資料分析有個奇怪的地方，就是發現不少違反 monotonicity 的受試者
-
-    -  bisection method 決定boundary的方法之一就是採用monotonicity，因此不應該發生這件事。
-    
--   重看當時的實驗程式，發現當時的做法和A學者所提Bisection不同，並沒有紀錄upper/lower bound再取中點，而是先用equal expectation決定初始值，直接以初始值的絕對值* 1/2 當作一開始的step size，之後的step size就一直折半下去。
-
-    -  姑且先稱作simplified Bisection (不用modified 是怕跟MOBS搞混)，取`Simp_Bisection`
-    
--   EDP 當時測的樣本點比A學者2016年的多，收到 $x_8^+, x_8^-$，且 Iteration = 5。以下模擬也會以這部分為基準進行討論。
-
-
-## Simulation Overview
-
--   EDP 裡面 simplified Bisection用的也是固定Iteration = 5的設定，因此根據Study 2的設定，訂定Iteration = 5, 10的情況下進行模擬。比較Study 2 中和其他方法間的差異。
-
-    -   參數設定一樣，固定value function，變動$\phi$
-
--   因為EDP樣本點較多，模擬也有做到 $x_8^+, x_8^-$額外獨立分析
-
-    -   多做 $\lambda=0.5, 1, 2.25$三個 levels 的模擬比較其 biasedness。
-    
-    -   分析違反 monotonicity 的比例
-
-# Simulation Setting Codes
+# Simulation Setting(Code Part)
 
 ```{r params}
 # Simulation Parameters
@@ -110,29 +92,38 @@ phi_names <- c("large", "medium","small")
 
 # methods
 method_levels <- c(
-  as.vector(mapply(function(base, suffix) c(base, paste0(base, suffix)),
-         base = c("Bisection", "Bisection-Slider", "MOBS"),
-         suffix = "_adaptiveBnd")),
-  as.vector(mapply(function(base, suffix) c(base, paste0(base, suffix)),
-         base = c("ASA", "PEST", "SimpBisection"),
-         suffix = "_randInit")),
+  as.vector(
+    outer(c("Bisection", "Bisection-Slider", "MOBS"),
+          c("", "_adaptiveBnd"),
+          paste0
+         )
+    ),
+  as.vector(
+    outer(c("ASA", "PEST", "SimpBisection"),
+          c("", "_randInit"),
+          paste0
+          )
+    ),
   "Bisection-ASA", "Bisection-ASA_adaptiveBnd"
   )
 
 method_labels <- (function(x) {
-  x <- gsub("_adaptiveBnd$", "\n(Adaptive Bound)", x)
-  x <- gsub("_randInit$",    "\n(Random Initial)", x)
-  x
+  # Apply regex-based substitutions for base method names
+  x <- gsub("^Bisection-Slider", "BiM-S", x)
+  # Then replace Bisection (not followed by -Slider)
+  x <- gsub("^Bisection", "BiM", x)
+  x <- gsub("^BiM-ASA$", "BiM-ASA_fixbnd", x)
+  x <- gsub("^SimpBisection", "HaB", x)
+  #
+  x <- ifelse(grepl("^(BiM|BiM-S|MOBS)$", x), paste0(x, "_fixbnd"), x)
 })(method_levels)
 
-method_levels.woAdapt <- method_levels[!grepl("adaptive", method_levels)]
-method_labels.woAdapt <- method_labels[!grepl("Adaptive", method_labels)]
-
+# Exclude AdaptiveBound, randInit, and Bisection-ASA
+method_levels.woAdapt <- method_levels[!grepl("adaptive|-ASA|ASA$|PEST$|HaB$", method_levels)]
+method_labels.woAdapt <- method_labels[!grepl("adaptive|-ASA|ASA$|PEST$|HaB$", method_labels)]
 ```
 
-
 ## Directories
-
 
 ```{r dir_params}
 dir_name <- here::here("simulated_data")
@@ -146,7 +137,7 @@ if (!dir.exists(pic_path)) {
 
 The simulation data is stored as a `data.frame`, making it easier to process.
 
--  `Bisecition-ASA` is newly added.
+-   `Bisecition-ASA` is newly added.
 
 ## Read file and Preprocess
 
@@ -229,6 +220,17 @@ cleaned_df <- early_df %>%
          )
 ```
 
+```{r}
+cleaned_df %>% pull(method) %>% table()
+```
+
+```{r}
+method_levels
+```
+
+```{r}
+method_labels
+```
 
 ## Bias and RMSE
 
@@ -259,8 +261,7 @@ early.bias_RMSE <- cleaned_df %>%
 
 The results show that simplified Bisection (`SimpBisection`) performs similarly to Bisection, in terms of RMSE.
 
-
-### Plot Function 
+### Plot Function
 
 ```{r}
 # Define a wrapper function for plotting
@@ -342,7 +343,7 @@ plot_early_bias_RMSE <- function(data, y_var, title, hline_value,
       y = title,
       color = "Iteration Number",
       shape = "Iteration Number",
-      title = paste(title, "(Fixed Iteration)")
+      # title = paste(title, "(Fixed Iteration)")
     ) +
     theme(
       axis.text.y = element_text(size=14)
@@ -350,40 +351,43 @@ plot_early_bias_RMSE <- function(data, y_var, title, hline_value,
 }
 ```
 
+### Bias (Figure 5)
 
-### Bias
-```{r rRMSE_early, fig.height=6, fig.width=18}
+```{r rRMSE_early, fig.height=PIC_HEIGHT, fig.width=PIC_WIDTH}
 p.bias <- early.bias_RMSE %>% 
-  filter(method %in% method_labels.woAdapt) %>% 
-  plot_early_bias_RMSE("bias", "Bias", 0)
+  filter(method %in% method_labels.woAdapt & !grepl("^Bisection-ASA", method)) %>% 
+  plot_early_bias_RMSE("bias", "Bias", 0) +
+  coord_cartesian(ylim = BIAS_BOUND)
 
-pname <- "study2_relativeRMSE.pdf"
-save_fig(pname, width = 18, height = 6, p_path = pic_path)
-
+pname <- "study2_bias.pdf"
+save_fig(pname, width = PIC_WIDTH, height = PIC_HEIGHT, p_path = pic_path)
 ```
 
-### RMSE
+### RMSE (Figure 6)
 
-```{r rRMSE_early, fig.height=6, fig.width=18}
+```{r rRMSE_early, fig.height=PIC_HEIGHT, fig.width=PIC_WIDTH}
 p.RMSE <- early.bias_RMSE %>% 
-  filter(method %in% method_labels.woAdapt) %>% 
-  plot_early_bias_RMSE("RMSE", "RMSE", 0, combine_first_two_rows = FALSE)
+  filter(method %in% method_labels.woAdapt & !grepl("^Bisection-ASA", method)) %>%  
+  plot_early_bias_RMSE("RMSE", "RMSE", 0, combine_first_two_rows = FALSE) +
+  coord_cartesian(ylim = RMSE_BOUND)
 
-pname <- "study2_relativeRMSE.pdf"
-save_fig(pname, width = 18, height = 6, p_path = pic_path)
+pname <- "study2_RMSE.pdf"
+save_fig(pname, width = PIC_WIDTH, height = PIC_HEIGHT, p_path = pic_path)
 
 ```
 
 ### relative RMSE
 
+
+
 ```{r rRMSE_early, fig.height=6, fig.width=18}
 p.rRMSE <- early.bias_RMSE %>% 
   group_by(phi, utility, early_stop) %>%
   mutate(
-    relative_RMSE = RMSE / RMSE[method == "Bisection"],
+    relative_RMSE = RMSE / RMSE[method == "BiM_fixbnd"],
     early_stop = as.factor(early_stop)
   ) %>% 
-  filter((method %in% method_labels.woAdapt) & method != "Bisection")  %>% 
+  filter((method %in% method_labels.woAdapt) & method != "BiM_fixbnd")  %>% 
   plot_early_bias_RMSE("relative_RMSE", "Relative RMSE to Biscetion", 1)
 
 pname <- "study2_relativeRMSE.pdf"
@@ -391,10 +395,9 @@ save_fig(pname, width = 18, height = 6, p_path = pic_path)
 
 ```
 
-
 ## Plots with Adaptive Bound
 
-This sections provide the addional plots (and results) with adaptive bound schemes in bisection-based methods. 
+This section provides additional analysis with adaptive bound schemes in bisection-based methods.
 
 ### Bias
 
@@ -408,7 +411,7 @@ invisible(early.bias_RMSE %>%
                        global_var_name = "global_y_ranges_bias"))
 
 p.bias1 <- early.bias_RMSE %>% 
-  filter(grepl("^(Bisection)|(MOBS)", method)) %>%
+  filter(grepl("^(BiM)|(MOBS)", method)) %>%
   plot_early_bias_RMSE("bias", "Bias", 0, 
                        combine_first_two_rows = TRUE, 
                        global_var_name = "global_y_ranges_bias") +
@@ -416,7 +419,7 @@ p.bias1 <- early.bias_RMSE %>%
   theme(title = element_text(size = 16))
 
 p.bias2 <- early.bias_RMSE %>% 
-  filter(!grepl("^(Bisection)|(MOBS)", method)) %>%
+  filter(!grepl("^(BiM)|(MOBS)", method)) %>%
   plot_early_bias_RMSE("bias", "Bias", 0, 
                        combine_first_two_rows = TRUE, 
                        global_var_name = "global_y_ranges_bias") +
@@ -442,7 +445,7 @@ invisible(early.bias_RMSE %>%
                        global_var_name = "global_y_ranges_RMSE"))
 
 p.RMSE1 <- early.bias_RMSE %>% 
-  filter(grepl("^(Bisection)|(MOBS)", method)) %>%
+  filter(grepl("^(BiM)|(MOBS)", method)) %>%
   plot_early_bias_RMSE("RMSE", "RMSE", 0, 
                        combine_first_two_rows = FALSE, 
                        global_var_name = "global_y_ranges_RMSE") +
@@ -450,7 +453,7 @@ p.RMSE1 <- early.bias_RMSE %>%
   theme(title = element_text(size = 16))
 
 p.RMSE2 <- early.bias_RMSE %>% 
-  filter(!grepl("^(Bisection)|(MOBS)", method)) %>%
+  filter(!grepl("^(BiM)|(MOBS)", method)) %>%
   plot_early_bias_RMSE("RMSE", "RMSE", 0, 
                        combine_first_two_rows = FALSE, 
                        global_var_name = "global_y_ranges_RMSE") +
@@ -466,55 +469,7 @@ p.RMSE1 / p.RMSE2  +
               )
 ```
 
-### Relative RMSE
-
-```{r, fig.height=13, fig.width=14}
-df.rRMSE <- early.bias_RMSE %>% 
-  group_by(phi, utility, early_stop) %>%
-  mutate(
-    relative_RMSE = RMSE / RMSE[method == "Bisection"],
-    early_stop = as.factor(early_stop)
-  ) %>% 
-  filter(method != "Bisection")
-
-
-invisible(df.rRMSE %>% 
-  plot_early_bias_RMSE("relative_RMSE", "", 1, 
-                       combine_first_two_rows = FALSE, 
-                       global_var_name = "global_y_ranges_relativeRMSE"))
-
-
-# plot_early_bias_RMSE("relative_RMSE", "Relative RMSE to Biscetion", 1)
-
-
-p.rRMSE1 <- df.rRMSE %>% 
-  filter(grepl("^(Bisection)|(MOBS)", method)) %>%
-  plot_early_bias_RMSE("relative_RMSE", "Relative RMSE", 1, 
-                       combine_first_two_rows = FALSE, 
-                       global_var_name = "global_y_ranges_relativeRMSE") +
-  ggtitle("Bisection-based Methods") +
-  theme(title = element_text(size = 16))
-
-p.rRMSE2 <- df.rRMSE %>% 
-  filter(!grepl("^(Bisection)|(MOBS)", method)) %>%
-  plot_early_bias_RMSE("relative_RMSE", "Relative RMSE", 1, 
-                       combine_first_two_rows = FALSE, 
-                       global_var_name = "global_y_ranges_relativeRMSE") +
-  ggtitle("Non-bisection Methods and SimpBisection") +
-  theme(title = element_text(size = 16))
-
-p.rRMSE1 / p.rRMSE2  +
-  plot_annotation(
-    title = 'Relative RMSE to Bisection in Study 2',
-    theme = theme(plot.title = element_text(size = 28, hjust = .5))) +
-  plot_layout(guides = 'collect',
-              axes = 'collect'  # This collects both x and y axes
-              )
-```
-
-
 ## Loss Aversion
-
 
 ### Preprocess
 
@@ -599,7 +554,6 @@ if (file.exists(file_path)) {
 
 ```
 
-
 ```{r}
 LA_result <- LA_result %>%
   select(!x0) %>% 
@@ -609,23 +563,23 @@ LA_result <- LA_result %>%
     method = gsub("_mix", "-", method),
     method =
       factor(method,
-             levels = method_levels
+             levels = method_levels,
+             labels = method_labels
              )
     )
 ```
 
-
-### 95% CI
+### compute 95% CI
 
 ```{r include=FALSE}
-custom_shapes <- c(rep(21, 6), 24, 24, 25, 25, 22, 22, 21, 21)
+custom_shapes <- c(rep(21, 6), 24, 24, 25, 24, 24, 25, 21, 21)
 names(custom_shapes) <- method_labels
 custom_shapes.woAdapt <- custom_shapes[!grepl("adaptive", method_levels)]
+custom_shapes.woAdapt <- custom_shapes[!grepl("adaptive|-ASA|ASA$|PEST$|HaB$", method_labels)]
+
 ```
 
-Rank the CI width b/t different loss aversion indices.
-- KT_mean, KT_median, KW
-- KW generally has the smallest CI width, especially when phi is large and medium.
+Rank the CI width b/t different loss aversion indices. - KT_mean, KT_median, KW - KW generally has the smallest CI width, especially when phi is large and medium.
 
 ```{r}
 LA_result %>%
@@ -653,12 +607,14 @@ LA_result %>%
     # Extract individual ranks for each type
     KT_mean_rank = CI_width_ranks[1],
     KT_median_rank = CI_width_ranks[2],
-    KW_rank = CI_width_ranks[3]
+    KW_rank = CI_width_ranks[3],
   ) %>%
   ungroup() %>%
-  relocate(ends_with('rank'), .after = method) %>% 
+  # relocate(ends_with('rank'), .after = method) %>% 
   arrange(phi, method)
 ```
+
+### 95% CI (Figure 7)
 
 ```{r fig.height=9, fig.width=10}
 LA_result %>% 
@@ -666,7 +622,11 @@ LA_result %>%
              is.finite(LA_est),
              early_stop == 10,
              LA_type != "KT_reg") %>%
-    mutate(early_stop = factor(as.numeric(early_stop))) %>%
+    mutate(
+      early_stop = factor(as.numeric(early_stop)),
+      # Reverse the factor levels of method according to reversed method_labels.woAdapt
+      method = factor(method, levels = rev(method_labels.woAdapt))
+      ) %>%
     group_by(phi, method, LA_type, early_stop) %>%
     ggplot() +
     geom_vline(
@@ -688,23 +648,29 @@ LA_result %>%
       geom = "point",
       size = 3.0
     ) +
-    facet_grid(phi ~ LA_type, scales = "free") +
+    facet_grid(phi ~ LA_type, 
+               # scales = "free"
+               ) +
     scale_x_continuous(
       transform = scales::pseudo_log_trans(base = 10),
       breaks = c(-20, -10, -5, 0, 1, 5, 10, 20, 40)
     ) +
-    scale_shape_manual(values = custom_shapes.woAdapt) +   # Custom shape mapping
-    scale_y_discrete(labels = method_levels.woAdapt) +  # Custom y-axis labels
+    scale_shape_manual(values = custom_shapes) +   # Custom shape mapping
     labs(
-      x = "Loss Aversion Coefficient",
+      x = "Loss Aversion Indices",
       y = "Methods",
-      title = "Loss Aversion Coefficients Estimates (Iteration = 10)"
+      # title = "Loss Aversion Coefficients Estimates (Iteration = 10)"
     ) +
     theme(
       panel.spacing.x = grid::unit(1, "lines"),     # Adjusts horizontal spacing
       legend.title = element_blank(),
       legend.text = element_text(size = 14)
-    )
+    )+
+    guides(
+      colour = "none",
+      shape  = "none",
+      fill = "none"
+  )
 
 pname <- "study2_LA_Summary_iter10.pdf"
 save_fig(pname, width = 11, height = 9, p_path = pic_path)
@@ -723,7 +689,7 @@ LA_summ <- LA_result %>%
     .groups = "drop"
   ) %>% 
   group_by(phi, LA_type, early_stop) %>% 
-  mutate(relative_RMSE = RMSE / RMSE[method == "Bisection"]) %>% 
+  mutate(relative_RMSE = RMSE / RMSE[method == "BiM_fixbnd"]) %>% 
   ungroup()
 ```
 
@@ -830,9 +796,7 @@ combined_plot <- wrap_plots(
 combined_plot
 ```
 
-
 #### RMSE
-
 
 ```{r, fig.height=9, fig.width=10}
 LA_summ %>% 
@@ -854,17 +818,16 @@ pname <- "study2_LA_RMSE_iter10.pdf"
 save_fig(pname, width = 10, height = 9, p_path = pic_path)
 ```
 
-
 ## Violations of Monotonicity
 
 -   EDP stage 1 的違反比率非常高 (20/87 當取到$x_8$, 14/87當取到$x_6$)。
-    
-    -  有一可能也是我們測的樣本點太多。
+
+    -   有一可能也是我們測的樣本點太多。
 
 -   但 simplified Bisection 除了$\phi$ small 時特別高，其他都在3%以下。
-    
+
     -   另外違反率大小在目前設定下看起來跟$\lambda$ (i.e., value function)沒有關係，只跟 $\phi$ 有關係。
-    
+
     -   從模型角度來看就是因為我們收的受試者選擇較隨機 ($\phi$較小)而非其他緣故
 
 ### Simulation results
@@ -872,7 +835,7 @@ save_fig(pname, width = 10, height = 9, p_path = pic_path)
 -   Simplified-Bisection 在 $\phi$ small 時的違反monotonicity比率甚至比PEST還要誇張。
 
 -   這也能部份解釋 EDP 當時違反monotonicity的情況很嚴重，代表此方法容易導致違反monotonicity。
-    
+
 -   過去研究中資料違反 monotonicity/stochastic dominance 的比率 (兩者皆使用 3+1 次 iterations 的bisection-slider法)
 
     -   A學者(2016) 違反stochastic dominance 比例(3/75 = `r round(3/75, 3)`)
@@ -899,7 +862,7 @@ monotone_df <- cleaned_df %>%
 
 monotone_df %>% 
   mutate(early_stop = as.numeric(early_stop),
-         method = factor(method, levels = method_levels)
+         method = factor(method, levels = method_levels, labels = method_labels)
          ) %>% 
   group_by(phi, early_stop, method) %>%
   summarise(
@@ -913,19 +876,23 @@ monotone_df %>%
     values_from = violation_ratio
   ) %>% 
   filter(!(`Iteration = 5` == "0%" & `Iteration = 10` == "0%"),
-         method %in% method_levels.woAdapt # filter out adaptive
+         !grepl("adaptive", method) # filter out adaptive
          ) %>% 
-  xtable::xtable()
+  arrange(phi, method)
+ # %>% 
+ #  xtable::xtable()
 ```
+
+
 
 
 # 小節
 
 -   EDP 中 simplified Bisection 法在受試者選擇較一致時與Bisection法的表現差不多，但是在 $\phi$ 很小的時候表現非常差。
-  
+
     -   RMSE 較大(在gain frame)，且違反monotonicity的比例較高。
 
 -   在 EDP 實驗中產生比較多違反monotonicity的受試者，可能的解釋之一是有許多受試者選擇隨機性較高。
-    
+
     -   違反monotonicity如果只和 $\phi$ 有關而和value function無關，或許可以從這方面去推估實驗$\phi$的數值。
     -   從模擬結果來看，SimpBisection 在 $\phi$ 小時的違反monotonicity比例較高。或許可以從違反monotonicity的比例來達到受試者的篩選，使得實驗結果的 random noise 較小。
