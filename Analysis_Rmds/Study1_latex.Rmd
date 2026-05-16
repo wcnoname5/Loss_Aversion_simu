@@ -292,9 +292,9 @@ df.bias_RMSE <- cleaned_df %>%
 
 ### Bias
 
-Table (provide a criterion of unbiasedness)
+- Table (provide a criterion of unbiasedness)
 
-The heat map below shows the (absolute) bias-to-true-value ratio under different criteria.
+- The heat map below shows the (absolute) bias-to-true-value ratio under different criteria. (*Note:* This table is not presented in the main text)
 
 ```{r, rows.print = 12, fig.height=7, fig.width=15}
 df.bias_prop <- df.bias_RMSE %>% 
@@ -397,7 +397,7 @@ save_fig(pname, width = PIC_WIDTH, height = PIC_HEIGHT, p_path = pic_path)
 One may suspect that the difference it due to the specification of the value function.
 Hence we vary in $\lambda$ in the value function in this section.
 
--   Theree levels of $\lambda$ are specified: 0.5, 1, 2.25.
+-   Theree levels of $\lambda$ are specified: $0.5$, $1$, $2.25$.
 
 ```{r bias_vary_lambda, fig.height=14, fig.width=14}
 df.tmp <- cleaned_df %>%
@@ -433,7 +433,7 @@ helper_plot <- function(df) {
     aes(
       y = bias,
       color = lambda,
-      shpae = lambda),
+      shape = lambda),
     size = 3) +
   scale_color_brewer(palette = "Dark2")+
   facet_grid(rows = vars(phi),
@@ -600,11 +600,10 @@ len_df <- len_df %>%
     # arrange(desc(Mean_Iteration_Number), .by_group = TRUE)
   arrange(method, .by_group = TRUE)
 len_df
-if (!file.exists("step.csv")) {
-  len_df %>% 
-    write_csv(
-      file = file.path(pic_path, "step.csv")
-    )
+step_csv_path <- file.path(pic_path, "step.csv")
+if (!file.exists(step_csv_path)) {
+  len_df %>%
+    write_csv(file = step_csv_path)
 }
 ```
 
@@ -613,6 +612,8 @@ if (!file.exists("step.csv")) {
 -  Since step size < 5 may not be appropriate for ASA (at least 64 iterations to terminate).
 
 -  The `m-reversal-out-of-k` rule is applied. We extract cases where 6 reversals happen in last 8 trials as the final estimate, compute the final trial counts and the estimates.   
+
+- *Note:* These analyses and figures are not included in the main text.
 
 ```{r}
 ASA_df <- read_rds(fname) %>% 

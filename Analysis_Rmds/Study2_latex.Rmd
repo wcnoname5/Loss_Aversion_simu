@@ -127,7 +127,7 @@ method_labels.woAdapt <- method_labels[!grepl("adaptive|-ASA|ASA$|PEST$|HaB$", m
 
 ```{r dir_params}
 dir_name <- here::here("simulated_data")
-pic_path <- pic_path <- here::here("Results_figs")
+pic_path <- here::here("Results_figs")
 if (!dir.exists(pic_path)) {
   dir.create(pic_path, recursive = TRUE)
 }
@@ -218,18 +218,6 @@ cleaned_df <- early_df %>%
   mutate(method = gsub("_mix", "-", method),
          early_stop = as.numeric(early_stop)
          )
-```
-
-```{r}
-cleaned_df %>% pull(method) %>% table()
-```
-
-```{r}
-method_levels
-```
-
-```{r}
-method_labels
 ```
 
 ## Bias and RMSE
@@ -353,9 +341,9 @@ plot_early_bias_RMSE <- function(data, y_var, title, hline_value,
 
 ### Bias (Figure 5)
 
-```{r rRMSE_early, fig.height=PIC_HEIGHT, fig.width=PIC_WIDTH}
-p.bias <- early.bias_RMSE %>% 
-  filter(method %in% method_labels.woAdapt & !grepl("^Bisection-ASA", method)) %>% 
+```{r bias_early, fig.height=PIC_HEIGHT, fig.width=PIC_WIDTH}
+p.bias <- early.bias_RMSE %>%
+  filter(method %in% method_labels.woAdapt & !grepl("^Bisection-ASA", method)) %>%
   plot_early_bias_RMSE("bias", "Bias", 0) +
   coord_cartesian(ylim = BIAS_BOUND)
 
@@ -365,9 +353,9 @@ save_fig(pname, width = PIC_WIDTH, height = PIC_HEIGHT, p_path = pic_path)
 
 ### RMSE (Figure 6)
 
-```{r rRMSE_early, fig.height=PIC_HEIGHT, fig.width=PIC_WIDTH}
-p.RMSE <- early.bias_RMSE %>% 
-  filter(method %in% method_labels.woAdapt & !grepl("^Bisection-ASA", method)) %>%  
+```{r RMSE_early, fig.height=PIC_HEIGHT, fig.width=PIC_WIDTH}
+p.RMSE <- early.bias_RMSE %>%
+  filter(method %in% method_labels.woAdapt & !grepl("^Bisection-ASA", method)) %>%
   plot_early_bias_RMSE("RMSE", "RMSE", 0, combine_first_two_rows = FALSE) +
   coord_cartesian(ylim = RMSE_BOUND)
 
@@ -398,6 +386,8 @@ save_fig(pname, width = 18, height = 6, p_path = pic_path)
 ## Plots with Adaptive Bound
 
 This section provides additional analysis with adaptive bound schemes in bisection-based methods.
+
+*Note:* The plots are not included in the main text.
 
 ### Bias
 
@@ -569,7 +559,7 @@ LA_result <- LA_result %>%
     )
 ```
 
-### compute 95% CI
+### Compute 95% CI
 
 ```{r include=FALSE}
 custom_shapes <- c(rep(21, 6), 24, 24, 25, 24, 24, 25, 21, 21)
@@ -579,7 +569,9 @@ custom_shapes.woAdapt <- custom_shapes[!grepl("adaptive|-ASA|ASA$|PEST$|HaB$", m
 
 ```
 
-Rank the CI width b/t different loss aversion indices. - KT_mean, KT_median, KW - KW generally has the smallest CI width, especially when phi is large and medium.
+- Rank the CI width b/t 3 different loss aversion indices: `KT_mean`, `KT_median`, `KW`
+
+- `KW` generally has the smallest CI width, especially when $\phi$ is large and medium.
 
 ```{r}
 LA_result %>%
@@ -677,6 +669,8 @@ save_fig(pname, width = 11, height = 9, p_path = pic_path)
 ```
 
 ### Bias and RMSE
+
+*Note:* These figures are not included in the main text
 
 ```{r}
 LA_summ <- LA_result %>% 
@@ -820,27 +814,13 @@ save_fig(pname, width = 10, height = 9, p_path = pic_path)
 
 ## Violations of Monotonicity
 
--   EDP stage 1 的違反比率非常高 (20/87 當取到$x_8$, 14/87當取到$x_6$)。
+This section tabulates, by method and $\phi$, the proportion of simulated
+participants whose elicited utility points fail monotonicity
+($x_6^- \dots \leq x_1^- \leq 0 \leq x_1^+ \dots \leq x_6^+$). Reference rates of stochastic
+dominance violations from prior empirical work are:
 
-    -   有一可能也是我們測的樣本點太多。
-
--   但 simplified Bisection 除了$\phi$ small 時特別高，其他都在3%以下。
-
-    -   另外違反率大小在目前設定下看起來跟$\lambda$ (i.e., value function)沒有關係，只跟 $\phi$ 有關係。
-
-    -   從模型角度來看就是因為我們收的受試者選擇較隨機 ($\phi$較小)而非其他緣故
-
-### Simulation results
-
--   Simplified-Bisection 在 $\phi$ small 時的違反monotonicity比率甚至比PEST還要誇張。
-
--   這也能部份解釋 EDP 當時違反monotonicity的情況很嚴重，代表此方法容易導致違反monotonicity。
-
--   過去研究中資料違反 monotonicity/stochastic dominance 的比率 (兩者皆使用 3+1 次 iterations 的bisection-slider法)
-
-    -   A學者(2016) 違反stochastic dominance 比例(3/75 = `r round(3/75, 3)`)
-
-    -   Bleichrod and L’Haridon (2023) 違反stochastic dominance 比例(10/122 = `r round(10/122, 3)`)
+-   Abdellaoui et al. (2016): not provided
+-   Bleichrodt and L'Haridon (2023): 10/122 = `r round(10/122, 3)`
 
 ```{r paged.print=TRUE, rows.print=9*2}
 monotone_df <- cleaned_df %>% 
@@ -860,10 +840,10 @@ monotone_df <- cleaned_df %>%
     ) %>%
   ungroup()
 
-monotone_df %>% 
+monotone_df %>%
   mutate(early_stop = as.numeric(early_stop),
          method = factor(method, levels = method_levels, labels = method_labels)
-         ) %>% 
+         ) %>%
   group_by(phi, early_stop, method) %>%
   summarise(
     # n = n(),
@@ -874,25 +854,11 @@ monotone_df %>%
     names_from = early_stop,
     names_glue = "Iteration = {early_stop}",
     values_from = violation_ratio
-  ) %>% 
+  ) %>%
   filter(!(`Iteration = 5` == "0%" & `Iteration = 10` == "0%"),
          !grepl("adaptive", method) # filter out adaptive
-         ) %>% 
+         ) %>%
   arrange(phi, method)
- # %>% 
+ # %>%
  #  xtable::xtable()
 ```
-
-
-
-
-# 小節
-
--   EDP 中 simplified Bisection 法在受試者選擇較一致時與Bisection法的表現差不多，但是在 $\phi$ 很小的時候表現非常差。
-
-    -   RMSE 較大(在gain frame)，且違反monotonicity的比例較高。
-
--   在 EDP 實驗中產生比較多違反monotonicity的受試者，可能的解釋之一是有許多受試者選擇隨機性較高。
-
-    -   違反monotonicity如果只和 $\phi$ 有關而和value function無關，或許可以從這方面去推估實驗$\phi$的數值。
-    -   從模擬結果來看，SimpBisection 在 $\phi$ 小時的違反monotonicity比例較高。或許可以從違反monotonicity的比例來達到受試者的篩選，使得實驗結果的 random noise 較小。
