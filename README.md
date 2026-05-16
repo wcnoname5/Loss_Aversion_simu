@@ -2,8 +2,7 @@
 
 This repository contains simulation code and results for comparing different
 choice-based elicitation methods used to estimate indifference points and
-loss aversion. For full motivation, methodology, and discussion, see
-[the thesis dissertation](https://doi.org/10.6342/NTU202501601).
+loss aversion.
 
 The benchmark is the non-parametric trade-off (TO) procedure of
 [Abdellaoui et al. (2016)](https://doi.org/10.1007/s11166-016-9234-y).
@@ -129,15 +128,6 @@ either delete older files from `simulated_data/` or hard-code the filename
 in the read chunk.
 
 ## Notes
-
-- The `functions/` code has been substantially modified from the original
-  paper to support adaptive boundary schemes for bisection-based methods,
-  so generated data and figures will not match thesis exactly.
-  For the original code and reproductions, switch branches:
-
-  ```bash
-  git checkout Archive
-  ```
 
 - `phi_calculator.R` is independent of the main pipeline. Given a target
   per-choice error rate, it solves for the softmax temperature `phi`

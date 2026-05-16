@@ -1,6 +1,6 @@
 ---
 title: "Empirical Study"
-author: "Wei-Chen Chang"
+author: "Anonymous"
 date: "`r Sys.Date()`"
 output:
   pdf_document:
