@@ -118,7 +118,7 @@ utility_method_labels <-
 
 ```
 
-## Directories
+## Directories 
 
 ```{r dir_params}
 # pics and data directories
@@ -127,12 +127,7 @@ pic_path <- here::here("Results_figs")
 if (!dir.exists(pic_path)) {
   dir.create(pic_path, recursive = TRUE)
 }
-```
 
-# Simulation 1
-
-Read files and preprocess data.
-```{r bound2}
 file_name <- 
   list.files(dir_name, pattern = "Study1_simulation.*\\.rds", full.names = FALSE) %>%
   sort() %>%
@@ -142,7 +137,135 @@ file_name <-
 cat("Using simulation file:", file_name, "\n")
 
 fname <- file.path(dir_name, file_name)
+```
 
+
+## Inspect choice prob traces over $\phi$
+
+Re-construct all pairs of choice(s) and compute the trial-level choice probability given the lambda levels.
+
+```{r}
+G  <- 2000; l1 <- -300; g1 <- 300
+id_cols <- c("alpha", "beta", "lambda", "phi", "method", "Nsim")
+
+# Unnest one search sequence (`stim`) into trials, then add the 4 payoffs.
+# `...` = named expressions for a1/a2/b1/b2.
+# `cand` = the value being tested on that trial; *_est columns are scalars.
+make_task <- function(df, stim, task_id, ...) {
+  df %>%
+    select(all_of(id_cols), ends_with("_est"), cand = all_of(stim)) %>%
+    unnest_longer(cand, indices_to = "trial") %>%
+    mutate(stim = stim, task_id = task_id, ...) %>%
+    select(all_of(id_cols), task_id, stim, trial,
+           a1, a2, b1, b2)
+}
+
+build_trials <- function(df, kmax = 6) {
+  tasks <- list(
+    # 1. Certainty equivalence: find L      [G, L] vs [0, 0]
+    make_task(df, "L", 1, a1 = G, a2 = cand, b1 = 0, b2 = 0),
+    # 2. find x1+                            [G, 0] vs [x1+, x1+]
+    make_task(df, "x1pos", 2, a1 = G, a2 = 0, b1 = cand, b2 = cand),
+    # 3. find x1-                            [0, L_est] vs [x1-, x1-]
+    make_task(df, "x1neg", 3, a1 = 0, a2 = L_est, b1 = cand, b2 = cand),
+    # 4. Lottery equivalence: find L2        [0, l1] vs [x1+_est, L2]
+    make_task(df, "L2", 4, a1 = 0, a2 = l1, b1 = x1pos_est, b2 = cand),
+    # 5. find G2                             [g1, 0] vs [G2, x1-_est]
+    make_task(df, "G2", 5, a1 = g1, a2 = 0, b1 = cand, b2 = x1neg_est)
+  )
+
+  for (k in 2:kmax) {
+    prev_neg <- paste0("x", k - 1, "neg_est")
+    prev_pos <- paste0("x", k - 1, "pos_est")
+    # 6. find x_{i+1}-                      [g1, x_i-_est] vs [G2_est, x_{i+1}-]
+    tasks[[length(tasks) + 1]] <- make_task(
+      df, paste0("x", k, "neg"), 6,
+      a1 = g1, a2 = .data[[prev_neg]], b1 = G2_est, b2 = cand)
+    # 7. find x_{i+1}+                      [x_i+_est, l1] vs [x_{i+1}+, L2_est]
+    tasks[[length(tasks) + 1]] <- make_task(
+      df, paste0("x", k, "pos"), 7,
+      a1 = .data[[prev_pos]], a2 = l1, b1 = cand, b2 = L2_est)
+  }
+
+  bind_rows(tasks) %>%
+    arrange(Nsim, task_id, stim, trial) %>%
+    group_by(Nsim) %>%
+    mutate(trial_global = row_number()) %>%   # order within a simulated participant
+    ungroup()
+}
+
+
+# Vectorized prospect value for a 2-outcome lottery (x1, x2), columnwise
+prospect_value <- function(x1, x2, alpha, beta, lambda, wp = 0.5, wn = 0.5) {
+  u1 <- CRRA(x1, alpha, beta, lambda)
+  u2 <- CRRA(x2, alpha, beta, lambda)
+
+  case_when(
+    x1 == x2              ~ u1,                              # sure thing
+    x1 >= 0 & x2 >= 0     ~ wp * u1 + (1 - wp) * u2,         # all gain
+    x1 <= 0 & x2 <= 0     ~ (1 - wn) * u1 + wn * u2,         # all loss
+    x1 >= 0 & x2 <= 0     ~ wp * u1 + wn * u2,               # mixed (gain, loss)
+    TRUE                  ~ wn * u1 + wp * u2                # mixed (loss, gain)
+  )
+}
+
+phi_map <- c(small = .phi *.1, medium = .phi, large = .phi*10)
+trials <- read_rds(fname) %>%
+  mutate(
+    method = factor(method_type, levels = utility_method_levels,
+                    labels = utility_method_labels),
+    .keep = "unused",
+   ) %>%
+  build_trials() %>%
+  mutate(
+    phi_val = phi_map[phi],
+    V_A  = prospect_value(a1,  a2,  alpha, beta, lambda),
+    V_B = prospect_value(b1, b2, alpha, beta, lambda),
+    p_left  = 1 / (1 + exp(phi_val * (V_B - V_A))),
+    p_higher = pmax(p_left, 1 - p_left)
+  )
+```
+
+### Visualization
+
+The trace of choosing over higher CPT value option, averaged over all target indifference points ($L, \{x_i^+\, x_i^-\}_{i=1,...6}$).
+
+```{r}
+stim_levels <- c("L",
+                 paste0("x", 1:6, "pos"),
+                 paste0("x", 1:6, "neg"))
+.lambda  <- 2.25
+trials %>%
+  filter(
+    lambda == .lambda,
+    trial <= 10,
+    stim %in% stim_levels,
+  ) %>% 
+  filter(
+    str_detect(method, ".(randInit|fixbnd)$")
+  ) %>%
+  ggplot(aes(x = trial, y = p_higher)) +
+  stat_summary(aes(), fun = mean, geom = "line", linewidth = 1, colour = "orange2") +
+  stat_summary(aes(), fun = mean, geom = "point", size = 2.5, colour = "orange2") +
+  facet_grid(phi ~ method) +
+  scale_x_continuous(breaks = c(5,10)) +
+  scale_y_continuous(breaks = seq(.5, 1, .1), limits = c(.5, 1)) +
+  labs(
+    y = "P(choosing higher CPT values)",
+    x = "Trial (Iteration)"
+  )
+
+pname <- "study1_prob_choose_higher_value.pdf"
+save_fig(pname, width = PIC_WIDTH, height = PIC_HEIGHT-1, p_path = pic_path)
+
+remove(trials)
+```
+
+
+# Simulation 1
+
+Read files and preprocess data.
+```{r bound2}
 bound_df <- read_rds(fname) %>% 
   rename(method = method_type) %>% 
   select(phi, method, alpha:lambda, Nsim, any_of("early_stop"),

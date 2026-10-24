@@ -114,14 +114,15 @@ method_labels <- (function(x) {
   x <- gsub("^Bisection", "BiM", x)
   x <- gsub("^BiM-ASA$", "BiM-ASA_fixbnd", x)
   x <- gsub("^SimpBisection", "HaB", x)
-  #
+  # add back fix_bnd for ibsection-based methods
   x <- ifelse(grepl("^(BiM|BiM-S|MOBS)$", x), paste0(x, "_fixbnd"), x)
 })(method_levels)
 
-# Exclude AdaptiveBound, randInit, and Bisection-ASA
-method_levels.woAdapt <- method_levels[!grepl("adaptive|-ASA|ASA$|PEST$|HaB$", method_levels)]
+# Exclude AdaptiveBound, fixed initial point (for ASA, PEST and HaB), and Bisection-ASA
+method_levels.woAdapt <- method_levels[!grepl("adaptive|-ASA|ASA$|PEST$|SimpBisection$", method_levels)]
 method_labels.woAdapt <- method_labels[!grepl("adaptive|-ASA|ASA$|PEST$|HaB$", method_labels)]
 ```
+
 
 ## Directories
 
@@ -131,17 +132,6 @@ pic_path <- here::here("Results_figs")
 if (!dir.exists(pic_path)) {
   dir.create(pic_path, recursive = TRUE)
 }
-```
-
-# Simulation 2 (new)
-
-The simulation data is stored as a `data.frame`, making it easier to process.
-
--   `Bisecition-ASA` is newly added.
-
-## Read file and Preprocess
-
-```{r read_early_stop}
 # Find the most recent simulation file matching the pattern
 file_name <- 
   list.files(dir_name, pattern = "Study2_simulation.*\\.rds", full.names = FALSE) %>%
@@ -153,6 +143,150 @@ cat("Using simulation file:", file_name, "\n")
 
 fname <- file.path(dir_name, file_name)
 
+```
+
+
+## Inspect choice prob traces over $\phi
+
+Re-construct all pairs of choice(s) and compute the trial-level choice probability given the lambda levels.
+
+```{r}
+G  <- 2000; l1 <- -300; g1 <- 300
+id_cols <- c("alpha", "beta", "lambda", "phi", "method", "Nsim")
+
+# Unnest one search sequence (`stim`) into trials, then add the 4 payoffs.
+# `...` = named expressions for a1/a2/b1/b2.
+# `cand` = the value being tested on that trial; *_est columns are scalars.
+make_task <- function(df, stim, task_id, ...) {
+  df %>%
+    select(all_of(id_cols), ends_with("_est"), cand = all_of(stim)) %>%
+    unnest_longer(cand, indices_to = "trial") %>%
+    mutate(stim = stim, task_id = task_id, ...) %>%
+    select(all_of(id_cols), task_id, stim, trial,
+           a1, a2, b1, b2)
+}
+
+build_trials <- function(df, kmax = 6) {
+  tasks <- list(
+    # 1. Certainty equivalence: find L      [G, L] vs [0, 0]
+    make_task(df, "L", 1, a1 = G, a2 = cand, b1 = 0, b2 = 0),
+    # 2. find x1+                            [G, 0] vs [x1+, x1+]
+    make_task(df, "x1pos", 2, a1 = G, a2 = 0, b1 = cand, b2 = cand),
+    # 3. find x1-                            [0, L_est] vs [x1-, x1-]
+    make_task(df, "x1neg", 3, a1 = 0, a2 = L_est, b1 = cand, b2 = cand),
+    # 4. Lottery equivalence: find L2        [0, l1] vs [x1+_est, L2]
+    make_task(df, "L2", 4, a1 = 0, a2 = l1, b1 = x1pos_est, b2 = cand),
+    # 5. find G2                             [g1, 0] vs [G2, x1-_est]
+    make_task(df, "G2", 5, a1 = g1, a2 = 0, b1 = cand, b2 = x1neg_est)
+  )
+
+  for (k in 2:kmax) {
+    prev_neg <- paste0("x", k - 1, "neg_est")
+    prev_pos <- paste0("x", k - 1, "pos_est")
+    # 6. find x_{i+1}-                      [g1, x_i-_est] vs [G2_est, x_{i+1}-]
+    tasks[[length(tasks) + 1]] <- make_task(
+      df, paste0("x", k, "neg"), 6,
+      a1 = g1, a2 = .data[[prev_neg]], b1 = G2_est, b2 = cand)
+    # 7. find x_{i+1}+                      [x_i+_est, l1] vs [x_{i+1}+, L2_est]
+    tasks[[length(tasks) + 1]] <- make_task(
+      df, paste0("x", k, "pos"), 7,
+      a1 = .data[[prev_pos]], a2 = l1, b1 = cand, b2 = L2_est)
+  }
+
+  bind_rows(tasks) %>%
+    arrange(Nsim, task_id, stim, trial) %>%
+    group_by(Nsim) %>%
+    mutate(trial_global = row_number()) %>%   # order within a simulated participant
+    ungroup()
+}
+
+
+# Vectorized prospect value for a 2-outcome lottery (x1, x2), columnwise
+prospect_value <- function(x1, x2, alpha, beta, lambda, wp = 0.5, wn = 0.5) {
+  u1 <- CRRA(x1, alpha, beta, lambda)
+  u2 <- CRRA(x2, alpha, beta, lambda)
+
+  case_when(
+    x1 == x2              ~ u1,                              # sure thing
+    x1 >= 0 & x2 >= 0     ~ wp * u1 + (1 - wp) * u2,         # all gain
+    x1 <= 0 & x2 <= 0     ~ (1 - wn) * u1 + wn * u2,         # all loss
+    x1 >= 0 & x2 <= 0     ~ wp * u1 + wn * u2,               # mixed (gain, loss)
+    TRUE                  ~ wn * u1 + wp * u2                # mixed (loss, gain)
+  )
+}
+
+phi_map <- c(small = .phi *.1, medium = .phi, large = .phi*10)
+trials <- read_rds(fname) %>% 
+  separate_wider_delim(
+    method_type,
+    delim = "_early",
+    names = c("method", "early_stop")
+  ) %>% 
+  filter(early_stop == "10") %>% 
+  mutate(
+    method = factor(
+      method,
+      levels = method_levels,
+      labels = method_labels)
+ ) %>% 
+  build_trials() %>%
+  mutate(
+    phi_val = phi_map[phi],
+    V_A  = prospect_value(a1,  a2,  alpha, beta, lambda),
+    V_B = prospect_value(b1, b2, alpha, beta, lambda),
+    p_left  = 1 / (1 + exp(phi_val * (V_B - V_A))),
+    p_higher = pmax(p_left, 1 - p_left)
+  )
+```
+
+
+### Visualization
+
+The trace of choosing over higher CPT value option, averaged over all target indifference points ($L, \{x_i^+\, x_i^-\}_{i=1,...6}$).
+
+```{r}
+stim_levels <- c("L",
+                 paste0("x", 1:6, "pos"),
+                 paste0("x", 1:6, "neg"))
+
+.lambda  <- 2.25
+trials %>%
+  filter(
+    lambda == .lambda,
+    trial <= 10,
+    stim %in% stim_levels,
+    method %in% method_labels.woAdapt
+  ) %>%
+  ggplot(aes(x = trial, y = p_higher)) +
+  stat_summary(aes(), fun = mean, geom = "line", linewidth = 1, colour = "cyan4") +
+  stat_summary(aes(), fun = mean, geom = "point", size = 2.5, colour = "cyan4") +
+  facet_grid(phi ~ method) +
+  scale_x_continuous(breaks = c(5,10)) +
+  scale_y_continuous(breaks = seq(.5, 1, .1), limits = c(.5, 1)) +
+  labs(
+    y = "P(choosing higher CPT values)",
+    x = "Trial (Iteration)"
+  )+
+  theme(
+    strip.text = element_text(size = 12),
+  )
+
+pname <- "study2_prob_choose_higher_value.pdf"
+save_fig(pname, width = PIC_WIDTH, height = PIC_HEIGHT - 1, p_path = pic_path)
+remove(trials)
+```
+
+
+# Simulation 2
+
+The simulation data is stored as a `data.frame`, making it easier to process.
+
+-   `Bisecition-ASA` and `_adaptiveBnd`s are added but the results are not presented in the final manuscript.
+  - The former is a estimation procedure start with Bisection then swithes to ASA in later iterations, the latter is an new boundary-scheme for bisection-based methods
+
+## Read file and Preprocess
+
+```{r read_early_stop}
 early_df <-
   readRDS(fname) %>% 
   separate_wider_delim(
@@ -220,6 +354,7 @@ cleaned_df <- early_df %>%
          )
 ```
 
+
 ## Bias and RMSE
 
 Compute Bias and RMSE
@@ -247,7 +382,8 @@ early.bias_RMSE <- cleaned_df %>%
   )
 ```
 
-The results show that simplified Bisection (`SimpBisection`) performs similarly to Bisection, in terms of RMSE.
+The results show that HaB performs similarly to Bisection, in terms of RMSE.
+## Bias & RMSE
 
 ### Plot Function
 
@@ -383,7 +519,7 @@ save_fig(pname, width = 18, height = 6, p_path = pic_path)
 
 ```
 
-## Plots with Adaptive Bound
+## (Extra) Plots with Adaptive Bound
 
 This section provides additional analysis with adaptive bound schemes in bisection-based methods.
 
@@ -561,12 +697,11 @@ LA_result <- LA_result %>%
 
 ### Compute 95% CI
 
+
 ```{r include=FALSE}
 custom_shapes <- c(rep(21, 6), 24, 24, 25, 24, 24, 25, 21, 21)
 names(custom_shapes) <- method_labels
-custom_shapes.woAdapt <- custom_shapes[!grepl("adaptive", method_levels)]
-custom_shapes.woAdapt <- custom_shapes[!grepl("adaptive|-ASA|ASA$|PEST$|HaB$", method_labels)]
-
+custom_shapes.woAdapt <- custom_shapes[method_labels.woAdapt]
 ```
 
 - Rank the CI width b/t 3 different loss aversion indices: `KT_mean`, `KT_median`, `KW`
