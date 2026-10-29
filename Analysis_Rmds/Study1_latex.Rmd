@@ -144,6 +144,8 @@ fname <- file.path(dir_name, file_name)
 
 Re-construct all pairs of choice(s) and compute the trial-level choice probability given the lambda levels.
 
+*Note:* This is similar the one in to `supplementary-phi-analysis`
+
 ```{r}
 G  <- 2000; l1 <- -300; g1 <- 300
 id_cols <- c("alpha", "beta", "lambda", "phi", "method", "Nsim")
@@ -229,6 +231,7 @@ trials <- read_rds(fname) %>%
 ### Visualization
 
 The trace of choosing over higher CPT value option, averaged over all target indifference points ($L, \{x_i^+\, x_i^-\}_{i=1,...6}$).
+
 
 ```{r}
 stim_levels <- c("L",

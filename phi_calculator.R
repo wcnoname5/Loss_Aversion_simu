@@ -52,5 +52,11 @@ mtx <- matrix(0, nrow = 2, ncol = length(err),
 for (i in 1 : length(err)){
   mtx[, i] <-  solve_phi(c(dU_1st, dU_2nd), err[i])
 }
-cat("column names stand for error rate, row names stand for conditions. \n")
+# Each entry is the corresponding phi value under that condition (error rate x target indifference point)
 print(round(mtx, 7))
+
+# Benchmark phi used in current experiment
+phis <- c(10, 1, .1) * .0367
+# prob of choosing lower CPT option on (2000, .5; -2000)
+cat("Prob of choosing lower CPT option on (2000, .5; -2000) = ")
+1 - Vectorize(softmax, vectorize.args = "phi")(dU_1st, phis)

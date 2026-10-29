@@ -55,6 +55,7 @@ Loss_Aversion_simu/
 │   ├── Study2_simulation_<timestamp>.rds
 │   ├── Study2_LA_df.rds            # cached loss-aversion table from Study2_latex.Rmd
 │   └── logs/                       # per-run process logs
+├── supplementary-phi-analysis/     # New analysis on how phi impacts choice probability (added 2026/10/29)
 └── Results_figs/                   # PDF figures produced by the Rmds (not in git)
 ```
 
